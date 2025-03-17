@@ -53,6 +53,8 @@ class GUI:
         process_menu = Menu(menubar, tearoff=0)
         process_menu.add_command(label="Grayscale", command=self.apply_grayscale)
         process_menu.add_command(label="Histogram", command=self.show_histogram)
+        process_menu.add_command(label="HSV", command=self.apply_hsv)
+        process_menu.add_command(label="LAB", command=self.apply_lab)
         return process_menu
     
     
@@ -95,6 +97,28 @@ class GUI:
         gray_image = self.processor.to_grayscale(self.current_image)
         self.tk_image = self.processor.convert_to_tkimage(gray_image)
         self.current_image = gray_image
+        self.image_label.config(image=self.tk_image)
+        self.image_label.image = self.tk_image
+        
+    @image_required
+    def apply_hsv(self):
+        if not self.processor.is_rgb(self.current_image):
+            self.show_error("Invalid Image", "HSV conversion requires RGB image")
+            return
+        hsv_image = self.processor.to_hsv(self.current_image)
+        self.tk_image = self.processor.convert_to_tkimage(hsv_image)
+        self.current_image = hsv_image
+        self.image_label.config(image=self.tk_image)
+        self.image_label.image = self.tk_image
+        
+    @image_required
+    def apply_lab(self):
+        if not self.processor.is_rgb(self.current_image):
+            self.show_error("Invalid Image", "LAB conversion requires RGB image")
+            return
+        lab_image = self.processor.to_lab(self.current_image)
+        self.tk_image = self.processor.convert_to_tkimage(lab_image)
+        self.current_image = lab_image
         self.image_label.config(image=self.tk_image)
         self.image_label.image = self.tk_image
 

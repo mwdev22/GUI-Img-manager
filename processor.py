@@ -20,16 +20,33 @@ class ImageProcessor:
         img_pil = Image.fromarray(image_rgb)
         return ImageTk.PhotoImage(img_pil)
 
-    @staticmethod
-    def to_grayscale(cv2_image):
-        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2GRAY)
-
-
+    # check if img is 2D
     @staticmethod
     def is_grayscale(image):
         return image.ndim == 2
     
-                
+    @staticmethod
+    def is_rgb(image):
+        # check if the image is 3D and has 3 channels
+        return image.ndim == 3 and image.shape[2] == 3
+
+    # conversions   
+    @staticmethod
+    def to_grayscale(cv2_image):
+        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2GRAY)
+    
+
+    @staticmethod
+    def to_hsv(cv2_image):
+        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2HSV)
+    
+    @staticmethod
+    def to_lab(cv2_image):
+        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2LAB)
+
+    
+    
+    # histograms            
     @staticmethod
     def grayscale_histogram(image_data):
         histogram = [0] * 256  
