@@ -1,57 +1,128 @@
-from tkinter import Tk, Button, filedialog
-import cv2
+from tkinter import Tk, Menu, filedialog, Label, messagebox
 from PIL import Image, ImageTk
-import tkinter as tk
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+from utils import image_required
+from processor import ImageProcessor
 
 
 class GUI:
     def __init__(self):
+        # base window config
         self.root = Tk()
-        self.root.title("OBRAZY")
-        self.root.geometry("500x400")
-
-        self.mount_button("Load Image", self.open_file_dialog, {"x": 180, "y": 20})
-
+        self.root.title("Image Processor")
+        self.root.geometry("800x600")
+        self.root.option_add('*tearOff', False)
         
 
-        self.image_label = tk.Label(self.root)
-        self.image_label.place(x=50, y=60)
+        # image variables for storing image data
+        self.og_image = None
+        self.current_image = None
+        self.tk_image = None
+        
+        # processor for image operations
+        self.processor = ImageProcessor()
+
+        self.mount_menu()
+
+        # image label for displaying
+        self.image_label = Label(self.root)
+        self.image_label.pack(fill="both", expand=True)
+
+    def mount_menu(self):
+        menubar = Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = self.create_file_menu(menubar)
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        process_menu = self.create_process_menu(menubar)
+        menubar.add_cascade(label="Process", menu=process_menu)
+    
+    
+    def create_file_menu(self, menubar):
+        file_menu = Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Load Image", command=self.open_file_dialog)
+        file_menu.add_command(label="Reset Image", command=self.reset_image)
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        return file_menu
+        
+    def create_process_menu(self, menubar):
+        process_menu = Menu(menubar, tearoff=0)
+        process_menu.add_command(label="Grayscale", command=self.apply_grayscale)
+        process_menu.add_command(label="Histogram", command=self.show_histogram)
+        return process_menu
+    
+    
 
     def open_file_dialog(self):
-        file_path = filedialog.askopenfilename(
-        title="Select an Image",
-        filetypes=[("Image Files", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.gif"))]
-         )
-        
-        if file_path:
-            print(file_path)
-            image = self.load_image(file_path)
-            self.display_image(image)
+        file_paths = filedialog.askopenfilenames(
+            title="Select Images",
+            filetypes=[("Image Files", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.gif"))]
+        )
 
-    def load_image(self, path, grayscale=False):
-        mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
-        image = cv2.imread(path, mode)
-        if image is None:
-            raise ValueError("Failed to load image")
-        return image
+        if file_paths:
+            self.load_image(file_paths[0])
 
-    def display_image(self, cv2_image):
+    #   info messages for user
+    def show_message(self, title, message):
+        messagebox.showinfo(title, message)
+    
+    def show_error(self, title, message):
+        messagebox.showerror(title, message)
         
-        image_rgb = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-      
-        img_pil = Image.fromarray(image_rgb)
-        img_pil = img_pil.resize((300, 200))  
-        img_tk = ImageTk.PhotoImage(img_pil)
+    def load_image(self, path):
+        # save the cv2 image for processing
+        self.current_image = self.processor.load_image(path)
+        # og image for possible reset
+        self.og_image = self.current_image.copy()
+        # tk image for displaying
+        self.tk_image = self.processor.convert_to_tkimage(self.current_image)
+        self.image_label.config(image=self.tk_image)
+        self.image_label.image = self.tk_image  
         
-        self.image_label.configure(image=img_tk)
-        self.image_label.image = img_tk
+    def reset_image(self):
+        self.current_image = self.og_image.copy()
+        self.tk_image = self.processor.convert_to_tkimage(self.current_image)
+        self.image_label.config(image=self.tk_image)
+        self.image_label.image = self.tk_image
 
-    def mount_button(self, text, command, position):
-        button = Button(self.root, text=text, command=command)
-        button.place(x=position['x'], y=position['y'])
+    # image operations
+    @image_required
+    def apply_grayscale(self):
+        gray_image = self.processor.to_grayscale(self.current_image)
+        self.tk_image = self.processor.convert_to_tkimage(gray_image)
+        self.current_image = gray_image
+        self.image_label.config(image=self.tk_image)
+        self.image_label.image = self.tk_image
+
+    @image_required
+    def show_histogram(self):
+        if self.processor.is_grayscale(self.current_image):
+            histogram = self.processor.grayscale_histogram(self.current_image)
+        else:
+            histogram = self.processor.rgb_histogram(self.current_image)
+        
+            
+        save = messagebox.askyesno("Save Histogram", "Do you want to save the histogram?")
+        if save:
+            file_path = filedialog.asksaveasfilename(
+                title="Save Histogram",
+                defaultextension=".txt",
+                filetypes=[("Text Files", "*.txt")]
+            )
+
+            if file_path:  
+                self.processor.save_histogram(file_path, histogram)
+                messagebox.showinfo("Success", f"Histogram saved to {file_path}")
+            
 
     def run(self):
         self.root.mainloop()
+        
+
 
 
 if __name__ == "__main__":
