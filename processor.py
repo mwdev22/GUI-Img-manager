@@ -44,6 +44,12 @@ class ImageProcessor:
     def to_lab(cv2_image):
         return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2LAB)
 
+    @staticmethod
+    def split_rgb_channels(cv2_image):
+        if not ImageProcessor.is_rgb(cv2_image):
+            raise ValueError("Image must be in RGB format")
+        return cv2.split(cv2_image)
+
     
     
     # histograms            
@@ -77,17 +83,5 @@ class ImageProcessor:
         plt.show()
 
         return histograms
-
-    @staticmethod
-    def save_histogram(path, histogram):
-        with open(path, 'w') as file:
-            if isinstance(histogram[0], (list, np.ndarray)):  # ensures that the histogram is RGB
-                file.write("Red Channel Histogram:\n")
-                file.write("\n".join(map(str, histogram[0])) + "\n")
-                file.write("\nGreen Channel Histogram:\n")
-                file.write("\n".join(map(str, histogram[1])) + "\n")
-                file.write("\nBlue Channel Histogram:\n")
-                file.write("\n".join(map(str, histogram[2])) + "\n")
-            else:                                             # otherwise, it is grayscale
-                file.write("Grayscale Histogram:\n")
-                file.write("\n".join(map(str, histogram)) + "\n")
+    
+    
