@@ -240,12 +240,28 @@ class GUI:
 
     @image_required
     def apply_stretch_histogram(self):
-        ...
+        stretched_image = self.processor.stretch_histogram(self.current_image)
+        self.current_image = stretched_image
+        self.display_current_image()
+        
+        if messagebox.askyesno("Histogram Comparison", "Show histogram comparison?"):
+            self.processor.compare_histograms(self.og_image, self.current_image)
 
     @image_required
     def apply_equalize_histogram(self):
-        ...
+        equalized_image = self.processor.equalize_histogram(self.current_image)
+        self.current_image = equalized_image
+        self.display_current_image()
+        
+        if messagebox.askyesno("Histogram Comparison", "Show histogram comparison?"):
+            self.processor.compare_histograms(self.og_image, self.current_image)
 
+    @image_required
+    def compare_histograms(self):
+        if self.og_image is None or self.current_image is None:
+            self.show_error("Error", "No images to compare")
+            return
+        self.processor.compare_histograms(self.og_image, self.current_image)
 
     def run(self):
         self.root.mainloop()

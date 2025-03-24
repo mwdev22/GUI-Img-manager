@@ -85,3 +85,61 @@ class ImageProcessor:
         return histograms
     
     
+    @staticmethod
+    def equalize_histogram(image):
+        if ImageProcessor.is_grayscale(image):
+            return cv2.equalizeHist(image)
+        else:
+            # equalize each channel separately for color images
+            channels = cv2.split(image)
+            equalized_channels = []
+            for ch in channels:
+                equalized_channels.append(cv2.equalizeHist(ch))
+            return cv2.merge(equalized_channels)
+
+    @staticmethod
+    def stretch_histogram(image):
+        def process_channel(channel):
+            min_val = np.min(channel)
+            max_val = np.max(channel)
+            if min_val == max_val: 
+                return channel
+            stretched = ((channel - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+            return stretched
+        
+        if ImageProcessor.is_grayscale(image):
+            process_channel(image)
+        else:
+            # for color images, process each channel separately
+            channels = cv2.split(image)
+            stretched_channels = []
+            for ch in channels:
+                stretched_ch = process_channel(ch)
+                stretched_channels.append(stretched_ch)
+            return cv2.merge(stretched_channels)
+
+    @staticmethod
+    def compare_histograms(original, processed):
+        plt.figure(figsize=(12, 6))
+        
+        if original.ndim == 2:  # grayscale
+            plt.subplot(1, 2, 1)
+            plt.hist(original.ravel(), 256, [0, 256], color='black')
+            plt.title('Original Histogram')
+            
+            plt.subplot(1, 2, 2)
+            plt.hist(processed.ravel(), 256, [0, 256], color='black')
+            plt.title('Processed Histogram')
+        else:  # Color
+            colors = ('b', 'g', 'r')
+            for i, color in enumerate(colors):
+                plt.subplot(2, 3, i+1)
+                plt.hist(original[:, :, i].ravel(), 256, [0, 256], color=color)
+                plt.title(f'Original {color.upper()} Channel')
+                
+                plt.subplot(2, 3, i+4)
+                plt.hist(processed[:, :, i].ravel(), 256, [0, 256], color=color)
+                plt.title(f'Processed {color.upper()} Channel')
+        
+        plt.tight_layout()
+        plt.show()
