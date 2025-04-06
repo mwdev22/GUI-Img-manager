@@ -70,8 +70,13 @@ class GUI:
         histogram_menu = Menu(process_menu, tearoff=0)
         histogram_menu.add_command(label="Stretch Histogram", command=self.apply_stretch_histogram)
         histogram_menu.add_command(label="Equalize Histogram", command=self.apply_equalize_histogram)
-        histogram_menu.add_command(label="Compare Histograms", command=self.compare_histograms)
+        # histogram_menu.add_command(label="Compare Histograms", command=self.compare_histograms)
         process_menu.add_cascade(label="Histogram Operations", menu=histogram_menu)
+        
+        point_op_menu = Menu(process_menu, tearoff=0)
+        point_op_menu.add_command(label="Negation", command=self.apply_negation)
+        point_op_menu.add_command(label="Stretch Range", command=self.apply_stretch_range)
+        process_menu.add_cascade(label="Point Operations",menu=point_op_menu)
         
         return process_menu
     
@@ -238,30 +243,43 @@ class GUI:
             tk_channel_image = self.processor.convert_to_tkimage(channel_image)
             self.show_separated_image(channel_names[i], tk_channel_image) 
 
-    @image_required
-    def apply_stretch_histogram(self):
-        stretched_image = self.processor.stretch_histogram(self.current_image)
-        self.current_image = stretched_image
-        self.display_current_image()
-        
-        if messagebox.askyesno("Histogram Comparison", "Show histogram comparison?"):
-            self.processor.compare_histograms(self.og_image, self.current_image)
-
+    
     @image_required
     def apply_equalize_histogram(self):
-        equalized_image = self.processor.equalize_histogram(self.current_image)
-        self.current_image = equalized_image
+        if not self.processor.is_grayscale(self.current_image):
+            self.show_error("Error", "This only works for grayscale images.")
+            return
+
+        processed = self.processor.equalize_histogram(self.current_image)
+        self.processor.compare_histograms(self.current_image, processed)
+        self.current_image = processed
         self.display_current_image()
         
-        if messagebox.askyesno("Histogram Comparison", "Show histogram comparison?"):
-            self.processor.compare_histograms(self.og_image, self.current_image)
+
 
     @image_required
-    def compare_histograms(self):
-        if self.og_image is None or self.current_image is None:
-            self.show_error("Error", "No images to compare")
+    def apply_stretch_histogram(self):
+        if not self.processor.is_grayscale(self.current_image):
+            self.show_error("Error", "This only works for grayscale images.")
             return
-        self.processor.compare_histograms(self.og_image, self.current_image)
+
+        processed = self.processor.stretch_histogram(self.current_image)
+        self.processor.compare_histograms(self.current_image, processed)
+        self.current_image = processed
+        self.display_current_image()
+
+    @image_required
+    def apply_negation(self):
+        negated_image = self.processor.negate_image(self.current_image)
+        self.current_image = negated_image
+        self.display_current_image()
+
+    @image_required
+    def apply_stretch_range(self):
+        p1, p2 = self.processor.find_min_max(self.current_image)
+        stretched_image = self.processor.stretch_range(self.current_image, p1, p2)
+        self.current_image = stretched_image
+        self.display_current_image()
 
     def run(self):
         self.root.mainloop()

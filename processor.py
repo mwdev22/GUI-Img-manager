@@ -4,8 +4,13 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from PIL import ImageTk
 
-class ImageProcessor:
+LMAX = 255
+LMIN = 0
 
+class ImageProcessor:
+    
+
+    # ---------- IMAGE CONVERSION -------------------
     @staticmethod
     def load_image(path, grayscale=False):
         mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
@@ -49,8 +54,8 @@ class ImageProcessor:
         if not ImageProcessor.is_rgb(cv2_image):
             raise ValueError("Image must be in RGB format")
         return cv2.split(cv2_image)
-
     
+#  ------------ HISTOGRAMS ---------------------------
     
     # histograms            
     @staticmethod
@@ -86,37 +91,58 @@ class ImageProcessor:
     
     
     @staticmethod
-    def equalize_histogram(image):
-        if ImageProcessor.is_grayscale(image):
-            return cv2.equalizeHist(image)
-        else:
-            # equalize each channel separately for color images
-            channels = cv2.split(image)
-            equalized_channels = []
-            for ch in channels:
-                equalized_channels.append(cv2.equalizeHist(ch))
-            return cv2.merge(equalized_channels)
+    def stretch_histogram(image):
+        image = Image.fromarray(image)
+        pixels = list(image.getdata())
+
+        min_pixel = min(pixels)
+        max_pixel = max(pixels)
+
+        # normalizacja
+        normalize = lambda value: int((value - min_pixel) / (max_pixel - min_pixel) * 255)
+
+        # skalowanie pixeli
+        new_pixels = [normalize(p) for p in pixels]
+        stretched = image.copy()
+        stretched.putdata(new_pixels)
+
+        return np.array(stretched)  # <-- konwersja z powrotem
+
 
     @staticmethod
-    def stretch_histogram(image):
-        def process_channel(channel):
-            min_val = np.min(channel)
-            max_val = np.max(channel)
-            if min_val == max_val: 
-                return channel
-            stretched = ((channel - min_val) / (max_val - min_val) * 255).astype(np.uint8)
-            return stretched
+    def equalize_histogram(image):
+        # konwersja do pil image z np.ndarray
+        image = Image.fromarray(image)
+        width, height = image.size
+        pixels = list(image.getdata())
+
+        # konwersja i pobranie pixeli
+        histogram = [0] * 256
+        for p in pixels:
+            histogram[p] += 1
+
+        # utworzenie histogramu
+        cdf = [0] * 256
+        cdf[0] = histogram[0]
+        for i in range(1, 256):
+            cdf[i] = cdf[i-1] + histogram[i]
+
+        # skumulowany histogram
+        cdf_min = next(v for v in cdf if v > 0)
+        total_pixels = width * height
         
-        if ImageProcessor.is_grayscale(image):
-            process_channel(image)
-        else:
-            # for color images, process each channel separately
-            channels = cv2.split(image)
-            stretched_channels = []
-            for ch in channels:
-                stretched_ch = process_channel(ch)
-                stretched_channels.append(stretched_ch)
-            return cv2.merge(stretched_channels)
+        # pierwszy niezerowy element 
+        cdf_normalized = [
+            round((cdf[i] - cdf_min) / (total_pixels - cdf_min) * 255)
+            for i in range(256)
+        ]
+
+        equalized_pixels = [cdf_normalized[p] for p in pixels]
+        equalized = image.copy()
+        equalized.putdata(equalized_pixels)
+
+        return np.array(equalized)  # <-- konwersja z powrotem
+
 
     @staticmethod
     def compare_histograms(original, processed):
@@ -143,3 +169,25 @@ class ImageProcessor:
         
         plt.tight_layout()
         plt.show()
+        
+        
+# ----------------- POINT 1-ARG OPERATIONS ----------------
+
+    @staticmethod
+    def negate_image(cv2_image):
+        # change img value to lmax - p
+        return LMAX - cv2_image
+
+    @staticmethod
+    def stretch_range(cv2_image, p1, p2, q3=0, q4=LMAX):
+        stretched_image = ((cv2_image - p1) / (p2 - p1)) * (q4 - q3) + q3
+        return np.clip(stretched_image, 0, 255).astype(np.uint8)  # make sure that values are in  [0, 255] range
+
+    @staticmethod
+    def find_min_max(cv2_image):
+        """
+        Znajdowanie minimalnej i maksymalnej wartości piksela w obrazie
+        """
+        min_pixel = np.min(cv2_image)
+        max_pixel = np.max(cv2_image)
+        return min_pixel, max_pixel

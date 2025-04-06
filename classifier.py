@@ -5,6 +5,8 @@ eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml
 
 cap = cv2.VideoCapture(0)
 
+# MA BYĆ NA WIDEO
+
 while True:
     ret, frame = cap.read()
     if not ret:
