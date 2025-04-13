@@ -1,4 +1,4 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button
+from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, simpledialog
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
@@ -46,38 +46,37 @@ class GUI:
         self.root.config(menu=menubar)
 
         file_menu = self.create_file_menu(menubar)
-        menubar.add_cascade(label="File", menu=file_menu)
+        menubar.add_cascade(label="Plik", menu=file_menu)
 
         process_menu = self.create_process_menu(menubar)
-        menubar.add_cascade(label="Process", menu=process_menu)
-    
-    
+        menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
+
     def create_file_menu(self, menubar):
         file_menu = Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Load Image", command=self.open_file_dialog)
-        file_menu.add_command(label="Reset Image", command=self.reset_image)
-        file_menu.add_command(label="Exit", command=self.root.quit)
+        file_menu.add_command(label="Wczytaj obraz", command=self.open_file_dialog)
+        file_menu.add_command(label="Resetuj obraz", command=self.reset_image)
+        file_menu.add_command(label="Zamknij", command=self.root.quit)
         return file_menu
-        
+
     def create_process_menu(self, menubar):
         process_menu = Menu(menubar, tearoff=0)
-        process_menu.add_command(label="Grayscale", command=self.apply_grayscale)
+        process_menu.add_command(label="Skaluj do odcieni szarości", command=self.apply_grayscale)
         process_menu.add_command(label="Histogram", command=self.show_histogram)
-        process_menu.add_command(label="HSV", command=self.apply_hsv)
-        process_menu.add_command(label="LAB", command=self.apply_lab)
-        process_menu.add_command(label="Split into RGB channels", command=self.split_channels)
-        
+        process_menu.add_command(label="Konwersja HSV", command=self.apply_hsv)
+        process_menu.add_command(label="Konwersja LAB", command=self.apply_lab)
+        process_menu.add_command(label="Rozdziel kanały RGB", command=self.split_channels)
+
         histogram_menu = Menu(process_menu, tearoff=0)
-        histogram_menu.add_command(label="Stretch Histogram", command=self.apply_stretch_histogram)
-        histogram_menu.add_command(label="Equalize Histogram", command=self.apply_equalize_histogram)
-        # histogram_menu.add_command(label="Compare Histograms", command=self.compare_histograms)
-        process_menu.add_cascade(label="Histogram Operations", menu=histogram_menu)
-        
+        histogram_menu.add_command(label="Rozciągnij histogram", command=self.apply_stretch_histogram)
+        histogram_menu.add_command(label="Wyrównaj histogram", command=self.apply_equalize_histogram)
+        process_menu.add_cascade(label="Operacje na histogramie", menu=histogram_menu)
+
         point_op_menu = Menu(process_menu, tearoff=0)
-        point_op_menu.add_command(label="Negation", command=self.apply_negation)
-        point_op_menu.add_command(label="Stretch Range", command=self.apply_stretch_range)
-        process_menu.add_cascade(label="Point Operations",menu=point_op_menu)
-        
+        point_op_menu.add_command(label="Negacja", command=self.apply_negation)
+        point_op_menu.add_command(label="Rozciąganie zakresu", command=self.apply_stretch_range)
+        point_op_menu.add_command(label="Posteryzacja", command=self.apply_posterization)
+        process_menu.add_cascade(label="Operacje punktowe", menu=point_op_menu)
+
         return process_menu
     
     def resize_image_to_fit(self, image, width, height):
@@ -107,12 +106,13 @@ class GUI:
 
     def open_file_dialog(self):
         file_paths = filedialog.askopenfilenames(
-            title="Select Images",
-            filetypes=[("Image Files", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.gif"))]
+            title="Wybierz obraz",
+            filetypes=[("Pliki graficzne", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.gif"))]
         )
 
         if file_paths:
             self.load_image(file_paths[0])
+
 
     #   info messages for user
     def show_message(self, title, message):
@@ -120,6 +120,10 @@ class GUI:
     
     def show_error(self, title, message):
         messagebox.showerror(title, message)
+    
+    ask_for_input_int = lambda self, title, prompt: simpledialog.askinteger(title, prompt, minvalue=2, maxvalue=256)
+
+    
         
     def load_image(self, path):
         self.current_image = self.processor.load_image(path)
@@ -145,11 +149,6 @@ class GUI:
         
         self.root.geometry(f"{new_width}x{new_height}")
         
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width - new_width) // 2
-        y = (screen_height - new_height) // 2
-        self.root.geometry(f"+{x}+{y}")
 
     def display_current_image(self, width=None, height=None):
         if self.current_image is None:
@@ -194,39 +193,38 @@ class GUI:
     @image_required
     def apply_hsv(self):
         if not self.processor.is_rgb(self.current_image):
-            self.show_error("Invalid Image", "HSV conversion requires RGB image")
+            self.show_error("Nieprawidłowy obraz", "Konwersja do HSV wymaga obrazu RGB.")
             return
         hsv_image = self.processor.to_hsv(self.current_image)
         self.current_image = hsv_image
         self.display_current_image()
-        
+
     @image_required
     def apply_lab(self):
         if not self.processor.is_rgb(self.current_image):
-            self.show_error("Invalid Image", "LAB conversion requires RGB image")
+            self.show_error("Nieprawidłowy obraz", "Konwersja do LAB wymaga obrazu RGB.")
             return
         lab_image = self.processor.to_lab(self.current_image)
         self.current_image = lab_image
         self.display_current_image()
 
-    @image_required
     def show_histogram(self):
         if self.processor.is_grayscale(self.current_image):
             histogram = self.processor.grayscale_histogram(self.current_image)
         else:
             histogram = self.processor.rgb_histogram(self.current_image)
-        
-        save = messagebox.askyesno("Save Histogram", "Do you want to save the histogram?")
+
+        save = messagebox.askyesno("Zapisz histogram", "Czy chcesz zapisać histogram?")
         if save:
             file_path = filedialog.asksaveasfilename(
-                title="Save Histogram",
+                title="Zapisz histogram",
                 defaultextension=".txt",
-                filetypes=[("Text Files", "*.txt")]
+                filetypes=[("Pliki tekstowe", "*.txt")]
             )
 
-            if file_path:  
+            if file_path:
                 self.processor.save_histogram(file_path, histogram)
-                messagebox.showinfo("Success", f"Histogram saved to {file_path}")
+                messagebox.showinfo("Sukces", f"Histogram zapisany w {file_path}")
         
 
     @image_required
@@ -247,26 +245,22 @@ class GUI:
     @image_required
     def apply_equalize_histogram(self):
         if not self.processor.is_grayscale(self.current_image):
-            self.show_error("Error", "This only works for grayscale images.")
+            self.show_error("Błąd", "Wyrównywanie histogramu działa tylko na obrazach w skali szarości.")
             return
-
         processed = self.processor.equalize_histogram(self.current_image)
-        self.processor.compare_histograms(self.current_image, processed)
         self.current_image = processed
         self.display_current_image()
-        
-
+        self.processor.compare_histograms(self.current_image, processed)
 
     @image_required
     def apply_stretch_histogram(self):
         if not self.processor.is_grayscale(self.current_image):
-            self.show_error("Error", "This only works for grayscale images.")
+            self.show_error("Błąd", "Rozciąganie histogramu działa tylko na obrazach w skali szarości.")
             return
-
         processed = self.processor.stretch_histogram(self.current_image)
-        self.processor.compare_histograms(self.current_image, processed)
         self.current_image = processed
         self.display_current_image()
+        self.processor.compare_histograms(self.current_image, processed)
 
     @image_required
     def apply_negation(self):
@@ -280,6 +274,21 @@ class GUI:
         stretched_image = self.processor.stretch_range(self.current_image, p1, p2)
         self.current_image = stretched_image
         self.display_current_image()
+        
+    @image_required
+    def apply_posterization(self):
+        if not self.processor.is_grayscale(self.current_image):
+            self.show_error("Błąd", "Posteryzacja działa tylko na obrazach w odcieniach szarości.")
+            return
+        try:
+            levels = int(self.ask_for_input_int("Poziomy posteryzacji", "Podaj liczbę poziomów szarości (2-256):"))
+            print(levels)
+            processed = self.processor.posterize_image(self.current_image, num_levels=levels)
+            self.current_image = processed
+            self.display_current_image()
+        except ValueError:
+            self.show_error("Nieprawidłowe dane", "Liczba poziomów szarości musi być z zakresu 2-256.")
+
 
     def run(self):
         self.root.mainloop()

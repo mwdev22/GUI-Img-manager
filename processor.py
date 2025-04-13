@@ -16,7 +16,7 @@ class ImageProcessor:
         mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
         image = cv2.imread(path, mode)
         if image is None:
-            raise ValueError("Failed to load image")
+            raise ValueError("Nie udało się pobrać obrazu")
         return image
 
     @staticmethod
@@ -52,7 +52,7 @@ class ImageProcessor:
     @staticmethod
     def split_rgb_channels(cv2_image):
         if not ImageProcessor.is_rgb(cv2_image):
-            raise ValueError("Image must be in RGB format")
+            raise ValueError("obraz musi być w formacie RGB")
         return cv2.split(cv2_image)
     
 #  ------------ HISTOGRAMS ---------------------------
@@ -89,6 +89,19 @@ class ImageProcessor:
 
         return histograms
     
+    @staticmethod
+    def save_histogram(path, histogram):
+        with open(path, 'w') as file:
+            if isinstance(histogram[0], (list, np.ndarray)):  # ensures that the histogram is RGB
+                file.write("Czerowny kanał:\n")
+                file.write("\n".join(map(str, histogram[0])) + "\n")
+                file.write("\nZielony kanał:\n")
+                file.write("\n".join(map(str, histogram[1])) + "\n")
+                file.write("\nNiebieski kanał:\n")
+                file.write("\n".join(map(str, histogram[2])) + "\n")
+            else:                                             # otherwise, it is grayscale
+                file.write("Histogram szaroodcieniowy:\n")
+                file.write("\n".join(map(str, histogram)) + "\n") 
     
     @staticmethod
     def stretch_histogram(image):
@@ -98,15 +111,18 @@ class ImageProcessor:
         min_pixel = min(pixels)
         max_pixel = max(pixels)
 
-        # normalizacja
-        normalize = lambda value: int((value - min_pixel) / (max_pixel - min_pixel) * 255)
+        if min_pixel == max_pixel:
+            return np.array(image)  # unikamy dzielenia przez 0
 
-        # skalowanie pixeli
+        # poprawiona normalizacja do [0, 255]
+        normalize = lambda value: int((value - min_pixel) * 255 / (max_pixel - min_pixel))
+
         new_pixels = [normalize(p) for p in pixels]
         stretched = image.copy()
         stretched.putdata(new_pixels)
 
-        return np.array(stretched)  # <-- konwersja z powrotem
+        return np.array(stretched)
+
 
 
     @staticmethod
@@ -151,27 +167,34 @@ class ImageProcessor:
         if original.ndim == 2:  # grayscale
             plt.subplot(1, 2, 1)
             plt.hist(original.ravel(), 256, [0, 256], color='black')
-            plt.title('Original Histogram')
+            plt.title('Bazowy Histogram')
             
             plt.subplot(1, 2, 2)
             plt.hist(processed.ravel(), 256, [0, 256], color='black')
-            plt.title('Processed Histogram')
+            plt.title('Histogram po operacji')
         else:  # Color
             colors = ('b', 'g', 'r')
             for i, color in enumerate(colors):
                 plt.subplot(2, 3, i+1)
                 plt.hist(original[:, :, i].ravel(), 256, [0, 256], color=color)
-                plt.title(f'Original {color.upper()} Channel')
+                plt.title(f'Bazowy {color.upper()} kanał')
                 
                 plt.subplot(2, 3, i+4)
                 plt.hist(processed[:, :, i].ravel(), 256, [0, 256], color=color)
-                plt.title(f'Processed {color.upper()} Channel')
+                plt.title(f'{color.upper()} kanał po operacji')
         
         plt.tight_layout()
         plt.show()
         
         
 # ----------------- POINT 1-ARG OPERATIONS ----------------
+
+    @staticmethod
+    def find_min_max(cv2_image):
+
+        min_pixel = np.min(cv2_image)
+        max_pixel = np.max(cv2_image)
+        return min_pixel, max_pixel
 
     @staticmethod
     def negate_image(cv2_image):
@@ -183,11 +206,56 @@ class ImageProcessor:
         stretched_image = ((cv2_image - p1) / (p2 - p1)) * (q4 - q3) + q3
         return np.clip(stretched_image, 0, 255).astype(np.uint8)  # make sure that values are in  [0, 255] range
 
+    def posterize_image(self, image: np.ndarray, num_levels=4):
+
+        
+        if num_levels < 2 or num_levels > 256:
+           raise ValueError("Poziomy szarości muszą być w zakresie 2-256")
+
+        if not self.is_grayscale(image):
+            raise ValueError("Obraz musi być szaroodcieniowy")
+
+        height, width = image.shape
+        step = 256 // num_levels
+        posterized = np.zeros_like(image)
+
+        for y in range(height):
+            for x in range(width):
+                pixel = image[y, x]
+                posterized[y, x] = (pixel // step) * step
+
+        return posterized
+
+        
+# --------------- NEIGHBOURHOOD OPERATIONS -------------------
     @staticmethod
-    def find_min_max(cv2_image):
-        """
-        Znajdowanie minimalnej i maksymalnej wartości piksela w obrazie
-        """
-        min_pixel = np.min(cv2_image)
-        max_pixel = np.max(cv2_image)
-        return min_pixel, max_pixel
+    def blur(image):
+        return cv2.blur(image)
+    
+    @staticmethod
+    def gaussian_blur(image):
+        return cv2.GaussianBlur(image)
+    
+    @staticmethod
+    def sobel(image):
+        return cv2.Sobel(image)
+    
+    @staticmethod
+    def laplacian(image):
+        return cv2.Laplacian(image)
+    
+    @staticmethod
+    def canny(image):
+        return cv2.Canny(image)
+    
+    @staticmethod
+    def sharpen_linear(image, mask):
+        return cv2.filter2D(image, kernel=mask)
+    
+    def sharpen_linear_laplacian(self, image, masks):
+        return [self.sharpen_linear(image, mask) for mask in masks]
+    
+    def direct_edge_detection(image):
+        ...
+
+    
