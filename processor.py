@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from PIL import ImageTk
+from typing import Union
+
 
 LMAX = 255
 LMIN = 0
@@ -24,7 +26,45 @@ class ImageProcessor:
         image_rgb = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
         img_pil = Image.fromarray(image_rgb)
         return ImageTk.PhotoImage(img_pil)
+    
+    def to_np_arr(self, img):
+        
+        if isinstance(img, Image.Image):
+            return np.array(img)
+        elif isinstance(img, ImageTk.PhotoImage):
+            return self.convert_tkimage_to_opencv(img)
+        elif isinstance(img, np.ndarray):
+            return img
+        else:
+            raise TypeError("Unsupported image type. The image must be PIL, Tkinter.PhotoImage, or a numpy array.")
 
+    @staticmethod
+    def convert_to_opencv_format(image):
+        if isinstance(image, ImageTk.PhotoImage):
+            image = ImageProcessor.convert_tkimage_to_opencv(image)
+        
+        elif isinstance(image, np.ndarray):
+            if len(image.shape) == 3 and image.shape[2] == 3:  
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            elif len(image.shape) == 2:  
+                pass
+        
+        else:
+            raise TypeError("Unsupported image type. The image must be PIL, Tkinter.PhotoImage, or a numpy array.")
+        
+        return image
+
+    @staticmethod
+    def convert_tkimage_to_opencv(tk_image: ImageTk.PhotoImage):
+        """
+        Convert Tkinter PhotoImage to OpenCV compatible BGR format.
+        """
+        # Convert Tkinter PhotoImage to RGB format
+        
+        image = np.array(tk_image)
+        # Convert RGB to BGR for OpenCV compatibility
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    
     # check if img is 2D
     @staticmethod
     def is_grayscale(image):

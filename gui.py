@@ -3,7 +3,7 @@ from PIL import Image, ImageTk
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-
+from typing import Union
 from utils import image_required
 from processor import ImageProcessor
 
@@ -16,33 +16,31 @@ class GUI:
         self.root.geometry("800x600")
         self.root.option_add('*tearOff', False)
         
-        # Set maximum window dimensions
-        self.max_width = 1200
-        self.max_height = 900
-        
-        # image variables for storing image data
-        self.og_image = None
-        self.current_image = None
-        self.tk_image = None
-        
         # processor for image operations
         self.processor = ImageProcessor()
 
         self.mount_menu()
-
+        
         # frame to hold the image label
-        self.image_frame = Frame(self.root)
-        self.image_frame.pack(fill="both", expand=True)
+        frame = Frame(self.root)
+        frame.pack(fill="both", expand=True)
 
         # image label for displaying
-        self.image_label = Label(self.image_frame)
-        self.image_label.pack(fill="both", expand=True)
+        image_label = Label(frame)
+        image_label.pack(fill="both", expand=True)
         
+        self.windows = {
+            self.root : WindowContext(self.root, image_label, None, frame=frame, processor=self.processor)
+        }
+        
+        self.context = self.windows[self.root]
         # resize event
-        self.root.bind("<Configure>", self.on_window_resize)
+        
 
-    def mount_menu(self):
-        menubar = Menu(self.root)
+    def mount_menu(self, root=None):
+        if root is None:
+            root = self.root
+        menubar = Menu(root)
         self.root.config(menu=menubar)
 
         file_menu = self.create_file_menu(menubar)
@@ -79,30 +77,6 @@ class GUI:
 
         return process_menu
     
-    def resize_image_to_fit(self, image, width, height):
-        h, w = image.shape[:2]
-        
-        aspect_ratio = w / h
-        target_ratio = width / height
-        
-        if aspect_ratio > target_ratio:
-            # image is wider than the target area
-            new_width = width
-            new_height = int(width / aspect_ratio)
-        else:
-            # image is taller than the target area
-            new_width = int(height * aspect_ratio)
-            new_height = height
-            
-        resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-        return resized
-    
-    def on_window_resize(self, event):
-        if hasattr(self, 'current_image') and self.current_image is not None:
-            window_width = self.root.winfo_width()
-            window_height = self.root.winfo_height() - 30  # approximate menu height
-            
-            self.display_current_image(window_width, window_height)
 
     def open_file_dialog(self):
         file_paths = filedialog.askopenfilenames(
@@ -126,93 +100,74 @@ class GUI:
     
         
     def load_image(self, path):
-        self.current_image = self.processor.load_image(path)
-        self.og_image = self.current_image.copy()
-        
-        self.adjust_window_size()
-        
-        self.display_current_image()
-
-
-    # window and image management
-    def adjust_window_size(self):
-        if self.current_image is None:
-            return
-            
-        h, w = self.current_image.shape[:2]
-        
-        margin_w = 50
-        margin_h = 80
-        
-        new_width = min(w + margin_w, self.max_width)
-        new_height = min(h + margin_h, self.max_height)
-        
-        self.root.geometry(f"{new_width}x{new_height}")
-        
-
-    def display_current_image(self, width=None, height=None):
-        if self.current_image is None:
-            return
-            
-        if width is None or height is None:
-            width = self.root.winfo_width()
-            height = self.root.winfo_height() - 30  
-        
-        resized_image = self.resize_image_to_fit(self.current_image, width, height)
-        
-        self.tk_image = self.processor.convert_to_tkimage(resized_image)
-        self.image_label.config(image=self.tk_image)
-        self.image_label.image = self.tk_image
-
-    def reset_image(self):
-        self.current_image = self.og_image.copy()
-        self.display_current_image()
+        ctx = self.windows.get(self.root)
+        ctx.image = self.processor.load_image(path)
+        ctx.og_image = ctx.image.copy()
+        ctx.label.bind("<Button-1>", lambda event, root=ctx.root, img=ctx.image: self.set_current_image(root, img))
+        self.context.adjust_window_size()
+        self.context.display_current_image()
 
     # image processsing
     @image_required
-    def show_separated_image(self, title, image):
+    def show_new_window(self, title, image, channel_image: np.ndarray):
         new_window = Toplevel(self.root)
         new_window.title(title)
         
-        h, w = image._PhotoImage__size
-        
-        max_width = min(w, 600)
-        max_height = min(h, 500)
-        new_window.geometry(f"{max_width}x{max_height}")
-        
+        frame = Frame(new_window)
+        frame.pack(fill="both", expand=True)
+
         label = Label(new_window, image=image)
         label.pack(fill="both", expand=True)
         label.image = image
+        
+        context = self.windows[new_window] = WindowContext(new_window, label, channel_image, frame, self.processor)
+        self.context.adjust_window_size()
+        self.context.display_current_image()
+        new_window.bind("<Configure>", lambda e, ctx=context: ctx.on_window_resize(e))
+        label.bind("<Button-1>", lambda event, root=new_window, img=channel_image: self.set_current_image(root, img))
+        
+    
+    def set_current_image(self, root, img: np.ndarray):
+        context = self.windows.get(root)
+        if context:
+            context.image = img
+            self.context = context
+            context.display_current_image()
+
+    def reset_image(self):
+        self.context.image = self.context.og_image.copy()
+        self.context.display_current_image()
+
 
     @image_required
     def apply_grayscale(self):
-        gray_image = self.processor.to_grayscale(self.current_image)
-        self.current_image = gray_image
-        self.display_current_image()
+        gray_image = self.processor.to_grayscale(self.context.image)
+        self.context.image = gray_image
+        self.context.display_current_image()
         
     @image_required
     def apply_hsv(self):
-        if not self.processor.is_rgb(self.current_image):
+        if not self.processor.is_rgb(self.context.image):
             self.show_error("Nieprawidłowy obraz", "Konwersja do HSV wymaga obrazu RGB.")
             return
-        hsv_image = self.processor.to_hsv(self.current_image)
-        self.current_image = hsv_image
-        self.display_current_image()
+        hsv_image = self.processor.to_hsv(self.context.image)
+        self.context.image = hsv_image
+        self.context.display_current_image()
 
     @image_required
     def apply_lab(self):
-        if not self.processor.is_rgb(self.current_image):
+        if not self.processor.is_rgb(self.context.image):
             self.show_error("Nieprawidłowy obraz", "Konwersja do LAB wymaga obrazu RGB.")
             return
-        lab_image = self.processor.to_lab(self.current_image)
-        self.current_image = lab_image
-        self.display_current_image()
+        lab_image = self.processor.to_lab(self.context.image)
+        self.context.image = lab_image
+        self.context.display_current_image()
 
     def show_histogram(self):
-        if self.processor.is_grayscale(self.current_image):
-            histogram = self.processor.grayscale_histogram(self.current_image)
+        if self.processor.is_grayscale(self.context.image):
+            histogram = self.processor.grayscale_histogram(self.context.image)
         else:
-            histogram = self.processor.rgb_histogram(self.current_image)
+            histogram = self.processor.rgb_histogram(self.context.image)
 
         save = messagebox.askyesno("Zapisz histogram", "Czy chcesz zapisać histogram?")
         if save:
@@ -229,63 +184,62 @@ class GUI:
 
     @image_required
     def split_channels(self):
-        if not self.processor.is_rgb(self.current_image):
+        if not self.processor.is_rgb(self.context.image):
             self.show_error("Invalid Image", "Channel splitting requires RGB image")
             return
         
-        channels = self.processor.split_rgb_channels(self.current_image)
+        channels = self.processor.split_rgb_channels(self.context.image)
         channel_names = ["Red Channel", "Green Channel", "Blue Channel"]
         
         for i, channel in enumerate(channels):
             channel_image = cv2.merge([channel, channel, channel])  
             tk_channel_image = self.processor.convert_to_tkimage(channel_image)
-            self.show_separated_image(channel_names[i], tk_channel_image) 
+            self.show_new_window(channel_names[i], tk_channel_image, channel_image) 
 
     
     @image_required
     def apply_equalize_histogram(self):
-        if not self.processor.is_grayscale(self.current_image):
+        if not self.processor.is_grayscale(self.context.image):
             self.show_error("Błąd", "Wyrównywanie histogramu działa tylko na obrazach w skali szarości.")
             return
-        processed = self.processor.equalize_histogram(self.current_image)
-        self.current_image = processed
-        self.display_current_image()
-        self.processor.compare_histograms(self.current_image, processed)
+        processed = self.processor.equalize_histogram(self.context.image)
+        self.context.image = processed
+        self.context.display_current_image()
+        self.processor.compare_histograms(self.context.image, processed)
 
     @image_required
     def apply_stretch_histogram(self):
-        if not self.processor.is_grayscale(self.current_image):
+        if not self.processor.is_grayscale(self.context.image):
             self.show_error("Błąd", "Rozciąganie histogramu działa tylko na obrazach w skali szarości.")
             return
-        processed = self.processor.stretch_histogram(self.current_image)
-        self.current_image = processed
-        self.display_current_image()
-        self.processor.compare_histograms(self.current_image, processed)
+        processed = self.processor.stretch_histogram(self.context.image)
+        self.context.image = processed
+        self.context.display_current_image()
+        self.processor.compare_histograms(self.context.image, processed)
 
     @image_required
     def apply_negation(self):
-        negated_image = self.processor.negate_image(self.current_image)
-        self.current_image = negated_image
-        self.display_current_image()
+        negated_image = self.processor.negate_image(self.context.image)
+        self.context.image = negated_image
+        self.context.display_current_image()
 
     @image_required
     def apply_stretch_range(self):
-        p1, p2 = self.processor.find_min_max(self.current_image)
-        stretched_image = self.processor.stretch_range(self.current_image, p1, p2)
-        self.current_image = stretched_image
-        self.display_current_image()
+        p1, p2 = self.processor.find_min_max(self.context.image)
+        stretched_image = self.processor.stretch_range(self.context.image, p1, p2)
+        self.context.image = stretched_image
+        self.context.display_current_image()
         
     @image_required
     def apply_posterization(self):
-        if not self.processor.is_grayscale(self.current_image):
+        if not self.processor.is_grayscale(self.context.image):
             self.show_error("Błąd", "Posteryzacja działa tylko na obrazach w odcieniach szarości.")
             return
         try:
             levels = int(self.ask_for_input_int("Poziomy posteryzacji", "Podaj liczbę poziomów szarości (2-256):"))
-            print(levels)
-            processed = self.processor.posterize_image(self.current_image, num_levels=levels)
-            self.current_image = processed
-            self.display_current_image()
+            processed = self.processor.posterize_image(self.context.image, num_levels=levels)
+            self.context.image = processed
+            self.context.display_current_image()
         except ValueError:
             self.show_error("Nieprawidłowe dane", "Liczba poziomów szarości musi być z zakresu 2-256.")
 
@@ -293,6 +247,83 @@ class GUI:
     def run(self):
         self.root.mainloop()
         
+        
+class WindowContext:
+    def __init__(self, root, label, image=None, frame=None, processor: ImageProcessor = None):
+        self.root: Union[Tk, Toplevel] = root
+        self.label: Label = label
+        self.image: Union[np.ndarray, None] = image
+        self.og_image: Union[np.ndarray, None] = image.copy() if image is not None else None
+        self.img_frame: Frame = frame
+        self.tk_image: Union[ImageTk.PhotoImage, None]  = None
+        self.processor = processor
+        self.max_width = 1200
+        self.max_height = 900
+        self.root.geometry("800x600")  
+    
+    def on_window_resize(self, event):
+            
+        # get current window size (accounting for decorations)
+        width = max(self.root.winfo_width(), 1)
+        height = max(self.root.winfo_height(), 1)
+            
+        self.display_current_image(width, height)
+    
+    def display_current_image(self, width=None, height=None):
+        if self.image is None:
+            return
+            
+        # get current dimensions if not provided
+        if width is None:
+            width = max(self.root.winfo_width(), 1)
+        if height is None:
+            height = max(self.root.winfo_height(), 1)
+            if isinstance(self.root, Tk):
+                height = max(height - 30, 1)
+
+        resized = self.resize_image_to_fit(self.image, width, height)
+        tk_image = self.processor.convert_to_tkimage(resized)
+
+        self.tk_image = tk_image
+        self.label.config(image=tk_image)
+        self.label.image = tk_image
+    
+    def resize_image_to_fit(self, image, width, height):
+        # ensure minimum dimensions
+        width = max(width, 1)
+        height = max(height, 1)
+        
+        h, w = image.shape[:2]
+        
+        # calculate aspect ratios
+        img_ratio = w / h
+        win_ratio = width / height
+        
+        if img_ratio > win_ratio:
+            # image is wider relative to window
+            new_width = width
+            new_height = int(width / img_ratio)
+        else:
+            new_height = height
+            new_width = int(height * img_ratio)
+            
+        new_width = max(new_width, 1)
+        new_height = max(new_height, 1)
+        
+        resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        return resized
+
+    def adjust_window_size(self):
+        if self.image is None:
+            return
+            
+        h, w = self.image.shape[:2]
+        margin_w = 50
+        margin_h = 80
+        new_width = min(w + margin_w, self.max_width)
+        new_height = min(h + margin_h, self.max_height)
+        
+        self.root.geometry(f"{new_width}x{new_height}")
 
 if __name__ == "__main__":
     app = GUI()
