@@ -4,8 +4,10 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
-from utils import image_required
 from processor import ImageProcessor
+from functools import wraps
+from tkinter import messagebox
+
 
 
 class GUI:
@@ -28,15 +30,35 @@ class GUI:
         # image label for displaying
         image_label = Label(frame)
         image_label.pack(fill="both", expand=True)
+
         
         self.windows = {
             self.root : WindowContext(self.root, image_label, None, frame=frame, processor=self.processor)
         }
         
         self.context = self.windows[self.root]
+        image_label.bind("<Button-1>", lambda event, root=self.root: self.set_current_image(root))
         # resize event
         
-
+        
+    
+    def image_required(func):
+        """Decorator to ensure an image is loaded before calling the function."""
+        @wraps(func)    
+        def wrapper(self, *args, **kwargs):
+            if self.context.image is None:
+                
+                messagebox.showinfo("No Image selected or loaded", "Please load an image first!")
+                self.open_file_dialog()
+                    
+                if self.context.image is not None:
+                    return func(self, *args, **kwargs)  
+                else:
+                    messagebox.showwarning("No Image Selected", "No image was selected.")
+            else:
+                return func(self, *args, **kwargs)  
+        return wrapper
+    
     def mount_menu(self, root=None):
         if root is None:
             root = self.root
@@ -103,7 +125,7 @@ class GUI:
         ctx = self.windows.get(self.root)
         ctx.image = self.processor.load_image(path)
         ctx.og_image = ctx.image.copy()
-        ctx.label.bind("<Button-1>", lambda event, root=ctx.root, img=ctx.image: self.set_current_image(root, img))
+        ctx.label.bind("<Button-1>", lambda event, root=ctx.root: self.set_current_image(root))
         self.context.adjust_window_size()
         self.context.display_current_image()
 
@@ -124,13 +146,12 @@ class GUI:
         self.context.adjust_window_size()
         self.context.display_current_image()
         new_window.bind("<Configure>", lambda e, ctx=context: ctx.on_window_resize(e))
-        label.bind("<Button-1>", lambda event, root=new_window, img=channel_image: self.set_current_image(root, img))
+        label.bind("<Button-1>", lambda event, root=new_window: self.set_current_image(root))
         
     
-    def set_current_image(self, root, img: np.ndarray):
+    def set_current_image(self, root):
         context = self.windows.get(root)
         if context:
-            context.image = img
             self.context = context
             context.display_current_image()
 
@@ -324,6 +345,10 @@ class WindowContext:
         new_height = min(h + margin_h, self.max_height)
         
         self.root.geometry(f"{new_width}x{new_height}")
+
+
+
+
 
 if __name__ == "__main__":
     app = GUI()
