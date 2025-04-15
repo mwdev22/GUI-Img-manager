@@ -1,10 +1,10 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, simpledialog
+from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
-from processor import ImageProcessor
+from processor import ImageProcessor, LAPLACIAN_MASKS
 from functools import wraps, partial
 from tkinter import messagebox
 
@@ -12,6 +12,7 @@ from tkinter import messagebox
 
 class GUI:
     def __init__(self):
+
         # base window config
         self.root = Tk()
         self.root.title("Image Processor")
@@ -38,27 +39,26 @@ class GUI:
         
         self.context = self.windows[self.root]
         image_label.bind("<Button-1>", lambda event, root=self.root: self.set_current_image(root))
-        # resize event
         
         
-    
+    # helper decorator for operations
     def image_required(func):
-        """Decorator to ensure an image is loaded before calling the function."""
         @wraps(func)    
         def wrapper(self, *args, **kwargs):
             if self.context.image is None:
                 
-                messagebox.showinfo("No Image selected or loaded", "Please load an image first!")
+                messagebox.showinfo("Brak Obrazu", "Najpierw wczytaj obraz, aby przeprowadzić operację.")
                 self.open_file_dialog()
                     
                 if self.context.image is not None:
                     return func(self, *args, **kwargs)  
                 else:
-                    messagebox.showwarning("No Image Selected", "No image was selected.")
+                    messagebox.showwarning("Nie wybrano obrzu", "Obraz nie został wczytany.")
             else:
                 return func(self, *args, **kwargs)  
         return wrapper
     
+    #  ------------- MENU -------------------
     def mount_menu(self, root=None):
         if root is None:
             root = self.root
@@ -98,16 +98,20 @@ class GUI:
         process_menu.add_cascade(label="Operacje punktowe", menu=point_op_menu)
         
         neighboorhood_op_menu = Menu(process_menu, tearoff=0)
+        neighboorhood_op_menu.add_command(label="Gaussian Blur", command=lambda: self.dispatch_neighborhood('gaussian_blur'))
         neighboorhood_op_menu.add_command(label="Laplacian", command=lambda: self.dispatch_neighborhood('laplacian'))
         neighboorhood_op_menu.add_command(label="Sobel", command=lambda: self.dispatch_neighborhood('sobel'))
-        neighboorhood_op_menu.add_command(label="Gaussian Blur", command=lambda: self.dispatch_neighborhood('gaussian_blur'))
         neighboorhood_op_menu.add_command(label="Canny", command=lambda: self.dispatch_neighborhood('canny'))
+        neighboorhood_op_menu.add_command(label="Prewitt", command=self.apply_prewitt)
+        neighboorhood_op_menu.add_command(label="Własna maska", command=self.apply_custom_mask)
+        neighboorhood_op_menu.add_command(label="Wyostrzanie liniowe (Laplacian)", command=self.apply_sharpen_laplacian)
 
         process_menu.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
 
         return process_menu
-    
+    # --------- END OF MENU -------------------
 
+    # --------- USER INTERACTIONS -------------
     def open_file_dialog(self):
         file_paths = filedialog.askopenfilenames(
             title="Wybierz obraz",
@@ -126,9 +130,70 @@ class GUI:
         messagebox.showerror(title, message)
     
     ask_for_input_int = lambda self, title, prompt: simpledialog.askinteger(title, prompt, minvalue=2, maxvalue=256)
+    
+    def custom_mask_dialog(self):
+        dialog = Toplevel()
+        dialog.title("Własna maska 3x3")
+        dialog.resizable(False, False)
+        
+        # budowanie macierzy
+        entries = []
+        for i in range(3):
+            row_entries = []
+            for j in range(3):
+                entry = Entry(dialog, width=5, justify='center')
+                entry.grid(row=i, column=j, padx=2, pady=2)
+                entry.insert(0, "0")  
+                row_entries.append(entry)
+            entries.append(row_entries)
+        
+        btn_frame = Frame(dialog)
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=5)
+        
+        result = None
+        
+        # react on users' input
+        def on_ok():
+            nonlocal result
+            try:
+                mask = []
+                for i in range(3):
+                    row = []
+                    for j in range(3):
+                        value = entries[i][j].get()
+                        if not value:
+                            raise ValueError(f"Pusta wartość --> wiersz: {i+1}, kolumna: {j+1}")
+                        row.append(float(value))
+                    mask.append(row)
+                
+                result = np.array(mask, dtype=np.float32)
+                dialog.destroy()
+            except ValueError as e:
+                messagebox.showerror("Błąd", f"Nieprawidłowa wartość: {str(e)}")
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Anuluj", command=on_cancel).pack(side=LEFT, padx=5)
+        
+        # center the dialog
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f'+{x}+{y}')
+        
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return result
 
     
-        
+    # -------------- END OF USER INTERACTIONS -------------
+    
+    # -------------- IMAGE MANAGEMENT ---------------------
     def load_image(self, path):
         ctx = self.windows.get(self.root)
         ctx.image = self.processor.load_image(path)
@@ -137,7 +202,18 @@ class GUI:
         self.context.adjust_window_size()
         self.context.display_current_image()
 
-    # image processsing
+    def set_current_image(self, root):
+        context = self.windows.get(root)
+        if context:
+            self.context = context
+            context.display_current_image()
+
+    def reset_image(self):
+        self.context.image = self.context.og_image.copy()
+        self.context.display_current_image()
+    # -------------- END OF IMAGE MANAGEMENT ---------------------
+
+    # -------------- IMAGE OPERATIONS ---------------------
     @image_required
     def show_new_window(self, title, image, channel_image: np.ndarray):
         new_window = Toplevel(self.root)
@@ -155,18 +231,6 @@ class GUI:
         self.context.display_current_image()
         new_window.bind("<Configure>", lambda e, ctx=context: ctx.on_window_resize(e))
         label.bind("<Button-1>", lambda event, root=new_window: self.set_current_image(root))
-        
-    
-    def set_current_image(self, root):
-        context = self.windows.get(root)
-        if context:
-            self.context = context
-            context.display_current_image()
-
-    def reset_image(self):
-        self.context.image = self.context.og_image.copy()
-        self.context.display_current_image()
-
 
     @image_required
     def apply_grayscale(self):
@@ -278,11 +342,43 @@ class GUI:
         self.context.image = processed_img
         self.context.display_current_image()
 
+    @image_required
+    def apply_sharpen_laplacian(self):
+        masks = LAPLACIAN_MASKS
+        try:
+            results = self.processor.sharpen_linear_laplacian(self.context.image, masks)
+            if not results:
+                messagebox.showwarning("Błąd", "Brak rezultatu z processingu.")
+                return
+                
+            for i, img in enumerate(results):
+                self.show_new_window(f"Laplacian mask {i+1}", 
+                                    self.processor.convert_to_tkimage(img), 
+                                    img)
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Błąd przy wyostrzaniu Laplacianem: {str(e)}")
+            
+    @image_required
+    def apply_prewitt(self):
+        results = self.processor.direct_edge_detection(self.context.image)
+        for direction, img in results.items():
+            self.show_new_window(f"Prewitt - {direction}", self.processor.convert_to_tkimage(img), img)
+
+    @image_required
+    def apply_custom_mask(self):
+        mask = self.custom_mask_dialog()
+        if mask is None:
+            return
+        result = self.processor.sharpen_linear(self.context.image, mask)
+        self.show_new_window("Własna maska 3x3", self.processor.convert_to_tkimage(result), result)
+
+    # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
         self.root.mainloop()
         
-        
+
+# helper class to manage opened windows and images
 class WindowContext:
     def __init__(self, root, label, image=None, frame=None, processor: ImageProcessor = None):
         self.root: Union[Tk, Toplevel] = root

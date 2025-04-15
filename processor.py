@@ -8,6 +8,30 @@ from typing import Union
 
 LMAX = 255
 LMIN = 0
+BORDER_TYPES = {
+    "reflect": cv2.BORDER_REFLECT,
+    "replicate": cv2.BORDER_REPLICATE,
+    "constant": cv2.BORDER_CONSTANT,
+    "wrap": cv2.BORDER_WRAP,
+    "default": cv2.BORDER_DEFAULT
+}
+LAPLACIAN_MASKS = [
+    np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]]),
+    np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]),
+    np.array([[1, -2, 1], [-2, 5, -2], [1, -2, 1]])
+]
+
+PREWITT_KERNELS = {
+    "N":  np.array([[1, 1, 1], [0, 0, 0], [-1, -1, -1]]),
+    "NE": np.array([[0, 1, 1], [-1, 0, 1], [-1, -1, 0]]),
+    "E":  np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]),
+    "SE": np.array([[-1, -1, 0], [-1, 0, 1], [0, 1, 1]]),
+    "S":  np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]]),
+    "SW": np.array([[0, -1, -1], [1, 0, -1], [1, 1, 0]]),
+    "W":  np.array([[1, 0, -1], [1, 0, -1], [1, 0, -1]]),
+    "NW": np.array([[1, 1, 0], [1, 0, -1], [0, -1, -1]])
+}
+
 
 class ImageProcessor:
     
@@ -23,9 +47,18 @@ class ImageProcessor:
 
     @staticmethod
     def convert_to_tkimage(cv2_image):
-        image_rgb = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-        img_pil = Image.fromarray(image_rgb)
-        return ImageTk.PhotoImage(img_pil)
+        # convert to 8-bit if necessary
+        if cv2_image.dtype != np.uint8:
+            cv2_image = cv2.normalize(cv2_image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        
+        # convert color space if needed
+        if len(cv2_image.shape) == 2:  
+            cv2_image = cv2.cvtColor(cv2_image, cv2.COLOR_GRAY2RGB)
+        else:  
+            cv2_image = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
+        
+        image_pil = Image.fromarray(cv2_image)
+        return ImageTk.PhotoImage(image_pil)
     
     def to_np_arr(self, img):
         
@@ -247,7 +280,6 @@ class ImageProcessor:
         return np.clip(stretched_image, 0, 255).astype(np.uint8)  # make sure that values are in  [0, 255] range
 
     def posterize_image(self, image: np.ndarray, num_levels=4):
-
         
         if num_levels < 2 or num_levels > 256:
            raise ValueError("Poziomy szarości muszą być w zakresie 2-256")
@@ -269,33 +301,56 @@ class ImageProcessor:
         
 # --------------- NEIGHBOURHOOD OPERATIONS -------------------
     @staticmethod
-    def blur(image):
-        return cv2.blur(image)
+    def blur(image, ksize=(5,5)):
+        return cv2.blur(image, ksize)
+
+    @staticmethod
+    def gaussian_blur(image, ksize=(5,5), sigmaX=0):
+        return cv2.GaussianBlur(image, ksize, sigmaX)
+    
+    def sobel(self, image, border_type="reflect"):
+        if not self.is_grayscale(image):
+            image = self.to_grayscale(image)
+        sobel_x = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3, borderType=BORDER_TYPES[border_type])
+        sobel_y = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3, borderType=BORDER_TYPES[border_type])
+        return cv2.magnitude(sobel_x, sobel_y)
+
+    def laplacian(self, image, border_type="reflect"):
+        if not self.is_grayscale(image):
+            image = self.to_grayscale(image)
+        laplacian = cv2.Laplacian(image, cv2.CV_64F, ksize=3, borderType=BORDER_TYPES[border_type])
+        return np.absolute(laplacian)
+    
+    def canny(self, image, threshold1=100, threshold2=200, apertureSize=3, L2gradient=False):
+        if not self.is_grayscale(image):
+            image = self.to_grayscale(image)
+        edges = cv2.Canny(image, threshold1, threshold2, 
+                        apertureSize=apertureSize, 
+                        L2gradient=L2gradient)
+        return edges
     
     @staticmethod
-    def gaussian_blur(image):
-        return cv2.GaussianBlur(image)
-    
-    @staticmethod
-    def sobel(image):
-        return cv2.Sobel(image)
-    
-    @staticmethod
-    def laplacian(image):
-        return cv2.Laplacian(image)
-    
-    @staticmethod
-    def canny(image):
-        return cv2.Canny(image)
-    
-    @staticmethod
-    def sharpen_linear(image, mask):
-        return cv2.filter2D(image, kernel=mask)
+    def sharpen_linear(image, mask, border_type="reflect"):
+        return cv2.filter2D(image, -1, kernel=mask, borderType=BORDER_TYPES[border_type])
     
     def sharpen_linear_laplacian(self, image, masks):
         return [self.sharpen_linear(image, mask) for mask in masks]
     
-    def direct_edge_detection(image):
-        ...
-
+    def direct_edge_detection(self, image, border_type="reflect"):
+        results = {}
+        
+        border_code = BORDER_TYPES.get(border_type, cv2.BORDER_REFLECT)
+        
+        if not self.is_grayscale(image):
+            image = self.to_grayscale(image)
+        
+        for direction, kernel in PREWITT_KERNELS.items():
+            filtered = cv2.filter2D(image, cv2.CV_64F, kernel=kernel, borderType=border_code)
+            
+            filtered = np.absolute(filtered)
+            filtered = cv2.normalize(filtered, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            
+            results[direction] = filtered
+        
+        return results
     
