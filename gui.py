@@ -1,10 +1,10 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT
+from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
-from processor import ImageProcessor, LAPLACIAN_MASKS
+from processor import ImageProcessor, LAPLACIAN_MASKS, BORDER_TYPES
 from functools import wraps, partial
 from tkinter import messagebox
 
@@ -98,14 +98,16 @@ class GUI:
         process_menu.add_cascade(label="Operacje punktowe", menu=point_op_menu)
         
         neighboorhood_op_menu = Menu(process_menu, tearoff=0)
+        neighboorhood_op_menu.add_command(label="Bliur", command=lambda: self.dispatch_neighborhood('blur'))
         neighboorhood_op_menu.add_command(label="Gaussian Blur", command=lambda: self.dispatch_neighborhood('gaussian_blur'))
-        neighboorhood_op_menu.add_command(label="Laplacian", command=lambda: self.dispatch_neighborhood('laplacian'))
-        neighboorhood_op_menu.add_command(label="Sobel", command=lambda: self.dispatch_neighborhood('sobel'))
+        neighboorhood_op_menu.add_command(label="Laplacian", command=lambda: self.dispatch_neighborhood('laplacian', ask_border=True))
+        neighboorhood_op_menu.add_command(label="Sobel", command=lambda: self.dispatch_neighborhood('sobel', ask_border=True))
         neighboorhood_op_menu.add_command(label="Canny", command=lambda: self.dispatch_neighborhood('canny'))
         neighboorhood_op_menu.add_command(label="Prewitt", command=self.apply_prewitt)
         neighboorhood_op_menu.add_command(label="Własna maska", command=self.apply_custom_mask)
         neighboorhood_op_menu.add_command(label="Wyostrzanie liniowe (Laplacian)", command=self.apply_sharpen_laplacian)
-
+        neighboorhood_op_menu.add_command(label="Filtracja Medianowa", command=self.apply_median_filter)
+        
         process_menu.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
 
         return process_menu
@@ -130,29 +132,73 @@ class GUI:
         messagebox.showerror(title, message)
     
     ask_for_input_int = lambda self, title, prompt: simpledialog.askinteger(title, prompt, minvalue=2, maxvalue=256)
+    ask_for_input_str = lambda self, title, prompt: simpledialog.askstring(title, prompt)
     
-    def custom_mask_dialog(self):
+    def _create_centered_dialog(self, title, width=None, height=None):
         dialog = Toplevel()
-        dialog.title("Własna maska 3x3")
+        dialog.title(title)
         dialog.resizable(False, False)
+        return dialog
+
+    def _center_dialog(self, dialog: Toplevel):
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f'+{x}+{y}')
+
+    def _add_ok_cancel_buttons(self, dialog: Toplevel, on_ok):
+        btn_frame = Frame(dialog)
+        btn_frame.pack(pady=5)
         
-        # budowanie macierzy
+        Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Anuluj", command=dialog.destroy).pack(side=LEFT, padx=5)
+        return btn_frame
+
+    def ask_border_dialog(self):
+        dialog = self._create_centered_dialog("Wybierz typ obramowania")
+        
+        selected_border = StringVar(value="default")
+        Label(dialog, text="Wybor obramowania").pack(pady=5)
+        
+        for name in BORDER_TYPES:
+            Radiobutton(
+                dialog,
+                text=name,
+                variable=selected_border,
+                value=name
+            ).pack(anchor=W, padx=10)
+        
+        confirmed = False
+        
+        def on_ok():
+            nonlocal confirmed
+            confirmed = True
+            dialog.destroy()
+        
+        self._add_ok_cancel_buttons(dialog, on_ok)
+        self._center_dialog(dialog)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return selected_border.get() if confirmed else None
+
+    def custom_mask_dialog(self, default_values=None):
+        dialog = self._create_centered_dialog("Własna maska 3x3")
+        
+        default_values = default_values or [[0]*3 for _ in range(3)]
         entries = []
+        
         for i in range(3):
-            row_entries = []
             for j in range(3):
                 entry = Entry(dialog, width=5, justify='center')
                 entry.grid(row=i, column=j, padx=2, pady=2)
-                entry.insert(0, "0")  
-                row_entries.append(entry)
-            entries.append(row_entries)
-        
-        btn_frame = Frame(dialog)
-        btn_frame.grid(row=3, column=0, columnspan=3, pady=5)
+                entry.insert(0, str(default_values[i][j]))
+                entries.append(entry)
         
         result = None
         
-        # react on users' input
         def on_ok():
             nonlocal result
             try:
@@ -160,9 +206,9 @@ class GUI:
                 for i in range(3):
                     row = []
                     for j in range(3):
-                        value = entries[i][j].get()
+                        value = entries[i*3 + j].get()
                         if not value:
-                            raise ValueError(f"Pusta wartość --> wiersz: {i+1}, kolumna: {j+1}")
+                            raise ValueError(f"Pusta wartość wiersz:{i+1}, kol:{j+1}")
                         row.append(float(value))
                     mask.append(row)
                 
@@ -171,13 +217,61 @@ class GUI:
             except ValueError as e:
                 messagebox.showerror("Błąd", f"Nieprawidłowa wartość: {str(e)}")
         
-        def on_cancel():
+        btn_frame = Frame(dialog)
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=5)
+        Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Anuluj", command=dialog.destroy).pack(side=LEFT, padx=5)
+        
+        self._center_dialog(dialog)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return result
+    
+    def median_filter_dialog(self):
+        dialog = self._create_centered_dialog("Filtracja medianowa")
+        
+        # Kernel size selection
+        Label(dialog, text="Rozmiar Kernela:").pack(pady=5)
+        kernel_size = IntVar(value=3)
+        
+        sizes_frame = Frame(dialog)
+        sizes_frame.pack()
+        for size in [3, 5, 7]:
+            Radiobutton(
+                sizes_frame,
+                text=f"{size}x{size}",
+                variable=kernel_size,
+                value=size
+            ).pack(side=LEFT, padx=5)
+        
+        Label(dialog, text="Border Handling:").pack(pady=5)
+        border_type = StringVar(value="reflect")
+        
+        border_frame = Frame(dialog)
+        border_frame.pack()
+        for btype in BORDER_TYPES:
+            Radiobutton(
+                border_frame,
+                text=btype,
+                variable=border_type,
+                value=btype
+            ).pack(anchor=W, padx=10)
+        
+        btn_frame = Frame(dialog)
+        btn_frame.pack(pady=10)
+        
+        result = None
+        
+        def on_ok():
+            nonlocal result
+            result = (kernel_size.get(), border_type.get())
             dialog.destroy()
         
         Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="Anuluj", command=on_cancel).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side=LEFT, padx=5)
         
-        # center the dialog
+        # Center dialog
         dialog.update_idletasks()
         width = dialog.winfo_width()
         height = dialog.winfo_height()
@@ -189,8 +283,6 @@ class GUI:
         dialog.wait_window()
         
         return result
-
-    
     # -------------- END OF USER INTERACTIONS -------------
     
     # -------------- IMAGE MANAGEMENT ---------------------
@@ -337,10 +429,29 @@ class GUI:
             self.show_error("Nieprawidłowe dane", "Liczba poziomów szarości musi być z zakresu 2-256.")
 
     @image_required
-    def dispatch_neighborhood(self, mode='laplacian'):
-        processed_img = getattr(self.processor, mode)(self.context.image)
-        self.context.image = processed_img
-        self.context.display_current_image()
+    def dispatch_neighborhood(self, mode='laplacian', ask_border=False):
+        
+        if not self.processor.is_grayscale(self.context.image):
+            self.show_error("Błąd", "Operacje sąsiedztwa działają tylko na obrazach w odcieniach szarości.")
+            return
+        
+        try:
+            if ask_border:
+                selected_border = self.ask_border_dialog()
+                if selected_border is None:
+                    return
+                processed_img = getattr(self.processor, mode)(
+                    self.context.image,
+                    border_type=selected_border
+                )
+            else:
+                processed_img = getattr(self.processor, mode)(self.context.image)
+            
+            self.context.image = processed_img
+            self.context.display_current_image()
+            
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Błąd operacji {mode}: {str(e)}")
 
     @image_required
     def apply_sharpen_laplacian(self):
@@ -371,6 +482,27 @@ class GUI:
             return
         result = self.processor.sharpen_linear(self.context.image, mask)
         self.show_new_window("Własna maska 3x3", self.processor.convert_to_tkimage(result), result)
+
+    @image_required
+    def apply_median_filter(self):
+        params = self.median_filter_dialog()
+        if not params:
+            return
+        
+        kernel_size, border_type = params
+        
+        try:
+            filtered = self.processor.median_filter(
+                self.context.image,
+                kernel_size=kernel_size,
+                border_type=border_type
+            )
+            
+            self.context.image = filtered
+            self.context.display_current_image()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Median filtering failed: {str(e)}")
 
     # -------------- END OF IMAGE OPERATIONS ---------------------
 

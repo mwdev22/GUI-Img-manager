@@ -11,10 +11,11 @@ LMIN = 0
 BORDER_TYPES = {
     "reflect": cv2.BORDER_REFLECT,
     "replicate": cv2.BORDER_REPLICATE,
-    "constant": cv2.BORDER_CONSTANT,
-    "wrap": cv2.BORDER_WRAP,
+    # "constant": cv2.BORDER_CONSTANT,
+    # "wrap": cv2.BORDER_WRAP,
     "default": cv2.BORDER_DEFAULT
 }
+
 LAPLACIAN_MASKS = [
     np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]]),
     np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]]),
@@ -308,14 +309,14 @@ class ImageProcessor:
     def gaussian_blur(image, ksize=(5,5), sigmaX=0):
         return cv2.GaussianBlur(image, ksize, sigmaX)
     
-    def sobel(self, image, border_type="reflect"):
+    def sobel(self, image, border_type="default"):
         if not self.is_grayscale(image):
             image = self.to_grayscale(image)
         sobel_x = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3, borderType=BORDER_TYPES[border_type])
         sobel_y = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3, borderType=BORDER_TYPES[border_type])
         return cv2.magnitude(sobel_x, sobel_y)
 
-    def laplacian(self, image, border_type="reflect"):
+    def laplacian(self, image, border_type="default"):
         if not self.is_grayscale(image):
             image = self.to_grayscale(image)
         laplacian = cv2.Laplacian(image, cv2.CV_64F, ksize=3, borderType=BORDER_TYPES[border_type])
@@ -326,19 +327,19 @@ class ImageProcessor:
             image = self.to_grayscale(image)
         edges = cv2.Canny(image, threshold1, threshold2, 
                         apertureSize=apertureSize, 
-                        L2gradient=L2gradient)
+                        L2gradient=L2gradient,
+                        )
         return edges
     
     @staticmethod
-    def sharpen_linear(image, mask, border_type="reflect"):
+    def sharpen_linear(image, mask, border_type="default"):
         return cv2.filter2D(image, -1, kernel=mask, borderType=BORDER_TYPES[border_type])
     
     def sharpen_linear_laplacian(self, image, masks):
         return [self.sharpen_linear(image, mask) for mask in masks]
     
-    def direct_edge_detection(self, image, border_type="reflect"):
+    def direct_edge_detection(self, image, border_type="default"):
         results = {}
-        
         border_code = BORDER_TYPES.get(border_type, cv2.BORDER_REFLECT)
         
         if not self.is_grayscale(image):
@@ -354,3 +355,14 @@ class ImageProcessor:
         
         return results
     
+    @staticmethod
+    def median_filter(image, kernel_size=3, border_type="reflect"):
+ 
+        if kernel_size not in [3, 5, 7]:
+            raise ValueError("Rozmiar jądra musi być 3, 5 lub 7")
+        
+        # Get border type code
+        border_code = BORDER_TYPES.get(border_type, cv2.BORDER_REFLECT)
+        
+        # Apply median blur
+        return cv2.medianBlur(image, kernel_size)
