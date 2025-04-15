@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
 from processor import ImageProcessor
-from functools import wraps
+from functools import wraps, partial
 from tkinter import messagebox
 
 
@@ -96,6 +96,14 @@ class GUI:
         point_op_menu.add_command(label="Rozciąganie zakresu", command=self.apply_stretch_range)
         point_op_menu.add_command(label="Posteryzacja", command=self.apply_posterization)
         process_menu.add_cascade(label="Operacje punktowe", menu=point_op_menu)
+        
+        neighboorhood_op_menu = Menu(process_menu, tearoff=0)
+        neighboorhood_op_menu.add_command(label="Laplacian", command=lambda: self.dispatch_neighborhood('laplacian'))
+        neighboorhood_op_menu.add_command(label="Sobel", command=lambda: self.dispatch_neighborhood('sobel'))
+        neighboorhood_op_menu.add_command(label="Gaussian Blur", command=lambda: self.dispatch_neighborhood('gaussian_blur'))
+        neighboorhood_op_menu.add_command(label="Canny", command=lambda: self.dispatch_neighborhood('canny'))
+
+        process_menu.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
 
         return process_menu
     
@@ -263,6 +271,12 @@ class GUI:
             self.context.display_current_image()
         except ValueError:
             self.show_error("Nieprawidłowe dane", "Liczba poziomów szarości musi być z zakresu 2-256.")
+
+    @image_required
+    def dispatch_neighborhood(self, mode='laplacian'):
+        processed_img = getattr(self.processor, mode)(self.context.image)
+        self.context.image = processed_img
+        self.context.display_current_image()
 
 
     def run(self):
