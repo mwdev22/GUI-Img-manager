@@ -85,7 +85,7 @@ class GUI:
         process_menu.add_command(label="Konwersja HSV", command=self.apply_hsv)
         process_menu.add_command(label="Konwersja LAB", command=self.apply_lab)
         process_menu.add_command(label="Rozdziel kanały RGB", command=self.split_channels)
-
+    
         histogram_menu = Menu(process_menu, tearoff=0)
         histogram_menu.add_command(label="Rozciągnij histogram", command=self.apply_stretch_histogram)
         histogram_menu.add_command(label="Wyrównaj histogram", command=self.apply_equalize_histogram)
@@ -109,11 +109,19 @@ class GUI:
         neighboorhood_op_menu.add_command(label="Filtracja Medianowa", command=self.apply_median_filter)
         
         process_menu.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
+        process_menu.add_command(label="Operacje Dwuargumentowe", command=self.perform_two_arg_operation)
+        
+        process_menu.add_command(label="Filtracja 2 oraz 1 etapowa (porownanie)", command=self.compare_filtering_methods)
+        
 
         return process_menu
     # --------- END OF MENU -------------------
 
     # --------- USER INTERACTIONS -------------
+    
+    def get_window_names(self):
+        return [window.title() for window in self.windows.keys() if isinstance(window, Toplevel) or isinstance(window, Tk)]
+    
     def open_file_dialog(self):
         file_paths = filedialog.askopenfilenames(
             title="Wybierz obraz",
@@ -155,6 +163,89 @@ class GUI:
         Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
         Button(btn_frame, text="Anuluj", command=dialog.destroy).pack(side=LEFT, padx=5)
         return btn_frame
+    
+    def find_window_by_title(self, title):
+        for window in self.windows:
+            if window.title() == title:
+                return self.windows[window]
+        return 
+    
+    def select_second_image_dialog(self):
+        if len(self.windows) < 2:
+            messagebox.showinfo("Brak okien", "Nie ma innych otwartych okien z obrazami.")
+            return None
+        
+        dialog = self._create_centered_dialog("Wybierz drugi obraz")
+        
+        Label(dialog, text="Wybierz obraz do operacji:").pack(pady=10)
+        
+        window_titles = [w.title() for w in self.windows.keys() 
+                if w != self.context.root and self.windows[w].image is not None]
+        
+        if not window_titles:
+            messagebox.showinfo("Brak obrazów", "Nie ma innych obrazów do wyboru.")
+            dialog.destroy()
+            return None
+        
+        selected_window = StringVar(value=window_titles[0])
+        
+        for title in window_titles:
+            Radiobutton(
+                dialog,
+                text=title,
+                variable=title,
+                value=title
+            ).pack(anchor=W, padx=10)
+        
+        operation_var = StringVar(value="add")
+        Label(dialog, text="Wybierz operację:").pack(pady=5)
+        
+        operations = [
+            ("Dodawanie", "add_images"),
+            ("Odejmowanie", "subtract_images"),
+            ("Mieszanie (blend)", "blend"),
+            ("Bitowe AND", "AND"),
+            ("Bitowe NOT", "NOT"),
+            ("Bitowe OR", "OR"),
+            ("Bitowe XOR", "XOR")
+        ]
+        
+        for text, mode in operations:
+            Radiobutton(
+                dialog,
+                text=text,
+                variable=operation_var,
+                value=mode
+            ).pack(anchor=W, padx=10)
+        
+        # For blend operation we need alpha parameter
+        alpha_frame = Frame(dialog)
+        alpha_frame.pack(pady=5)
+        Label(alpha_frame, text="Alpha <dla operacji blend> (0-1):").pack(side=LEFT)
+        alpha_entry = Entry(alpha_frame, width=5)
+        alpha_entry.pack(side=LEFT)
+        alpha_entry.insert(0, "0.5")
+        
+        result = None
+        
+        def on_ok():
+            nonlocal result
+            try:
+                alpha = float(alpha_entry.get())
+                if not 0 <= alpha <= 1:
+                    raise ValueError("Alpha musi być w zakresie 0-1")
+                
+                result = (selected_window.get(), operation_var.get(), alpha)
+                dialog.destroy()
+            except ValueError as e:
+                messagebox.showerror("Błąd", str(e))
+       
+        self._center_dialog(dialog)
+        self._add_ok_cancel_buttons(dialog, on_ok)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return result
 
     def ask_border_dialog(self):
         dialog = self._create_centered_dialog("Wybierz typ obramowania")
@@ -184,14 +275,14 @@ class GUI:
         
         return selected_border.get() if confirmed else None
 
-    def custom_mask_dialog(self, default_values=None):
-        dialog = self._create_centered_dialog("Własna maska 3x3")
+    def custom_mask_dialog(self, title = "Własna maska", default_values=None, mask_size=3):
+        dialog = self._create_centered_dialog(title=title)
         
-        default_values = default_values or [[0]*3 for _ in range(3)]
+        default_values = default_values or [[0]*mask_size for _ in range(mask_size)]
         entries = []
         
-        for i in range(3):
-            for j in range(3):
+        for i in range(mask_size):
+            for j in range(mask_size):
                 entry = Entry(dialog, width=5, justify='center')
                 entry.grid(row=i, column=j, padx=2, pady=2)
                 entry.insert(0, str(default_values[i][j]))
@@ -203,10 +294,10 @@ class GUI:
             nonlocal result
             try:
                 mask = []
-                for i in range(3):
+                for i in range(mask_size):
                     row = []
-                    for j in range(3):
-                        value = entries[i*3 + j].get()
+                    for j in range(mask_size):
+                        value = entries[i*mask_size + j].get()
                         if not value:
                             raise ValueError(f"Pusta wartość wiersz:{i+1}, kol:{j+1}")
                         row.append(float(value))
@@ -218,7 +309,7 @@ class GUI:
                 messagebox.showerror("Błąd", f"Nieprawidłowa wartość: {str(e)}")
         
         btn_frame = Frame(dialog)
-        btn_frame.grid(row=3, column=0, columnspan=3, pady=5)
+        btn_frame.grid(row=mask_size, column=0, columnspan=mask_size, pady=5)
         Button(btn_frame, text="OK", command=on_ok).pack(side=LEFT, padx=5)
         Button(btn_frame, text="Anuluj", command=dialog.destroy).pack(side=LEFT, padx=5)
         
@@ -388,9 +479,10 @@ class GUI:
             self.show_error("Błąd", "Wyrównywanie histogramu działa tylko na obrazach w skali szarości.")
             return
         processed = self.processor.equalize_histogram(self.context.image)
+        old_img = self.context.image.copy()
         self.context.image = processed
         self.context.display_current_image()
-        self.processor.compare_histograms(self.context.image, processed)
+        self.processor.compare_histograms(old_img, processed)
 
     @image_required
     def apply_stretch_histogram(self):
@@ -398,9 +490,10 @@ class GUI:
             self.show_error("Błąd", "Rozciąganie histogramu działa tylko na obrazach w skali szarości.")
             return
         processed = self.processor.stretch_histogram(self.context.image)
+        old_img = self.context.image.copy()
         self.context.image = processed
         self.context.display_current_image()
-        self.processor.compare_histograms(self.context.image, processed)
+        self.processor.compare_histograms(old_img, processed)
 
     @image_required
     def apply_negation(self):
@@ -455,9 +548,11 @@ class GUI:
 
     @image_required
     def apply_sharpen_laplacian(self):
-        masks = LAPLACIAN_MASKS
         try:
-            results = self.processor.sharpen_linear_laplacian(self.context.image, masks)
+            selected_border = self.ask_border_dialog()
+            if selected_border is None:
+                return
+            results = self.processor.sharpen_linear_laplacian(self.context.image, border_type=selected_border)
             if not results:
                 messagebox.showwarning("Błąd", "Brak rezultatu z processingu.")
                 return
@@ -480,7 +575,7 @@ class GUI:
         mask = self.custom_mask_dialog()
         if mask is None:
             return
-        result = self.processor.sharpen_linear(self.context.image, mask)
+        result = self.processor.custom_mask(self.context.image, mask)
         self.show_new_window("Własna maska 3x3", self.processor.convert_to_tkimage(result), result)
 
     @image_required
@@ -503,7 +598,93 @@ class GUI:
             
         except Exception as e:
             messagebox.showerror("Error", f"Median filtering failed: {str(e)}")
+    @image_required
+    def perform_two_arg_operation(self):
+        """Perform two-argument operation between current image and selected image"""
+        selection = self.select_second_image_dialog()
+        if not selection:
+            return
+        
+        selected_window_ref, operation, alpha = selection
+        second_context = self.find_window_by_title(selected_window_ref)
+        
+        if second_context is None or second_context.image is None:
+            messagebox.showerror("Błąd", "Wybrany obraz jest pusty lub okno zostało zamknięte.")
+            return
+        try:
+            image1 = self.context.image
+            image2 = second_context.image
+            print(image1.shape, image2.shape)
+            
+            if image1.shape != image2.shape:
+                messagebox.showerror("Błąd", "Obrazy muszą mieć te same wymiary.")
+                return
+            
+            args = {'image1': image1, 'image2': image2}
+            if operation == "blend":
+                args.update({'alpha': alpha})
+            elif operation == "NOT":
+                args.pop('image2')
+            processed_img = getattr(self.processor, operation)(**args)
+            
+            if processed_img is not None:
+                self.context.image = processed_img
+                self.context.display_current_image()
+                
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Operacja nie powiodła się: {str(e)}")
+            
+    @image_required
+    def compare_filtering_methods(self):
+        if not self.processor.is_grayscale(self.context.image):
+            self.show_error("Błąd", "Operacja wymaga obrazu w odcieniach szarości.")
+            return
 
+        smooth_kernel = np.array(self.custom_mask_dialog(title="Maska Wygładzania",default_values=[[0, 0, 0], [0, 0, 0], [0, 0, 0]], mask_size=3), dtype=np.float32)
+        
+        sharpen_kernel = np.array(self.custom_mask_dialog(title="Maska Wyostrzania", default_values=[[0, 0, 0], [0, 1, 0], [0, 0, 0]], mask_size=3), dtype=np.float32)
+
+        combined_kernel = self.processor.combine_kernels(smooth_kernel, sharpen_kernel)
+
+        border_type = self.ask_border_dialog()
+        if border_type is None:
+            return
+
+        smoothed, two_stage_result = self.processor.two_stage_filter(
+            self.context.image, smooth_kernel, sharpen_kernel, border_type)
+        
+        single_stage_result = self.processor.custom_mask(
+            self.context.image, combined_kernel, border_type)
+
+        self.show_new_window("Faza 1: Wygładzanie", 
+                           self.processor.convert_to_tkimage(smoothed), 
+                           smoothed)
+        
+        self.show_new_window("Faza 2: Wyostrzanie (dwuetapowy)", 
+                           self.processor.convert_to_tkimage(two_stage_result), 
+                           two_stage_result)
+        
+        self.show_new_window("Filtracja jednoetapowa (5x5)", 
+                           self.processor.convert_to_tkimage(single_stage_result), 
+                           single_stage_result)
+
+        difference = self.processor.img_diff(single_stage_result, two_stage_result)
+        self.show_new_window("Różnica między metodami", 
+                           self.processor.convert_to_tkimage(difference), 
+                           difference)
+
+        diff_mean = np.mean(difference)
+        diff_max = np.max(difference)
+        diff_std = np.std(difference)
+        
+        stats_msg = (
+            f"Statystyki różnic:\n"
+            f"Średnia: {diff_mean:.2f}\n"
+            f"Maksimum: {diff_max}\n"
+            f"Odchylenie standardowe: {diff_std:.2f}"
+        )
+        
+        messagebox.showinfo("Statystyki porównania", stats_msg)
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
@@ -523,6 +704,13 @@ class WindowContext:
         self.max_width = 1200
         self.max_height = 900
         self.root.geometry("800x600")  
+        
+    @staticmethod
+    def find_window_by_title(gui: GUI, title):
+        for window in gui.windows:
+            if window.title() == title:
+                return window
+        return None
     
     def on_window_resize(self, event):
             
@@ -541,8 +729,6 @@ class WindowContext:
             width = max(self.root.winfo_width(), 1)
         if height is None:
             height = max(self.root.winfo_height(), 1)
-            if isinstance(self.root, Tk):
-                height = max(height - 30, 1)
 
         resized = self.resize_image_to_fit(self.image, width, height)
         tk_image = self.processor.convert_to_tkimage(resized)
@@ -550,6 +736,7 @@ class WindowContext:
         self.tk_image = tk_image
         self.label.config(image=tk_image)
         self.label.image = tk_image
+        
     
     def resize_image_to_fit(self, image, width, height):
         # ensure minimum dimensions

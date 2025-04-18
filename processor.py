@@ -5,7 +5,6 @@ from PIL import Image
 from PIL import ImageTk
 from typing import Union
 
-
 LMAX = 255
 LMIN = 0
 BORDER_TYPES = {
@@ -110,9 +109,8 @@ class ImageProcessor:
         return image.ndim == 3 and image.shape[2] == 3
 
     # conversions   
-    @staticmethod
-    def to_grayscale(cv2_image):
-        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2GRAY)
+    def to_grayscale(self, cv2_image):
+        return cv2.cvtColor(cv2_image, cv2.COLOR_BGR2GRAY) if self.is_rgb(cv2_image) else cv2_image
     
 
     @staticmethod
@@ -186,6 +184,7 @@ class ImageProcessor:
         max_pixel = max(pixels)
 
         if min_pixel == max_pixel:
+            print(max_pixel, min_pixel)
             return np.array(image)  # unikamy dzielenia przez 0
 
         # poprawiona normalizacja do [0, 255]
@@ -196,8 +195,6 @@ class ImageProcessor:
         stretched.putdata(new_pixels)
 
         return np.array(stretched)
-
-
 
     @staticmethod
     def equalize_histogram(image):
@@ -299,6 +296,38 @@ class ImageProcessor:
 
         return posterized
 
+# --------------- POINT 2-ARG OPERATIONS ----------------
+
+    @staticmethod
+    def add_images(image1, image2):
+        return cv2.add(image1, image2)
+    
+    @staticmethod
+    def subtract_images(image1, image2):
+        return cv2.subtract(image1, image2)
+    
+    @staticmethod  
+    def blend(image1, image2, alpha=0.5):
+        return cv2.addWeighted(image1, alpha, image2, 1 - alpha, 0)
+    
+    @staticmethod    
+    def XOR(image1, image2):
+        return cv2.bitwise_xor(image1, image2)
+    
+    @staticmethod
+    def AND(image1, image2):
+        return cv2.bitwise_and(image1, image2)
+    
+    @staticmethod
+    def OR(image1, image2):
+        return cv2.bitwise_or(image1, image2)
+    
+    @staticmethod
+    def NOT(image1):
+        return cv2.bitwise_not(image1)
+        
+    
+    
         
 # --------------- NEIGHBOURHOOD OPERATIONS -------------------
     @staticmethod
@@ -332,11 +361,11 @@ class ImageProcessor:
         return edges
     
     @staticmethod
-    def sharpen_linear(image, mask, border_type="default"):
+    def custom_mask(image, mask, border_type="default"):
         return cv2.filter2D(image, -1, kernel=mask, borderType=BORDER_TYPES[border_type])
     
-    def sharpen_linear_laplacian(self, image, masks):
-        return [self.sharpen_linear(image, mask) for mask in masks]
+    def sharpen_linear_laplacian(self, image, border_type='default', masks=LAPLACIAN_MASKS):
+        return [self.custom_mask(image, mask, border_type=border_type) for mask in masks]
     
     def direct_edge_detection(self, image, border_type="default"):
         results = {}
@@ -347,7 +376,6 @@ class ImageProcessor:
         
         for direction, kernel in PREWITT_KERNELS.items():
             filtered = cv2.filter2D(image, cv2.CV_64F, kernel=kernel, borderType=border_code)
-            
             filtered = np.absolute(filtered)
             filtered = cv2.normalize(filtered, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
             
@@ -361,8 +389,33 @@ class ImageProcessor:
         if kernel_size not in [3, 5, 7]:
             raise ValueError("Rozmiar jądra musi być 3, 5 lub 7")
         
-        # Get border type code
-        border_code = BORDER_TYPES.get(border_type, cv2.BORDER_REFLECT)
         
-        # Apply median blur
-        return cv2.medianBlur(image, kernel_size)
+        return cv2.medianBlur(image, ksize=kernel_size)
+    
+    
+# --------------- GEOMETRIC TRANSFORMATIONS -------------------
+    @staticmethod
+    def two_stage_filter(image, smooth_kernel, sharpen_kernel, border_type=cv2.BORDER_DEFAULT):
+        
+        smoothed = cv2.filter2D(image, -1, smooth_kernel, borderType=BORDER_TYPES[border_type])
+        
+        sharpened = cv2.filter2D(smoothed, -1, sharpen_kernel, borderType=BORDER_TYPES[border_type])
+        
+        return smoothed, sharpened
+
+
+    @staticmethod
+    def combine_kernels(kernel1, kernel2):
+        
+        combined = np.zeros((5, 5), dtype=np.float32)
+        for i in range(3):  # kernel1 rows
+            for j in range(3):  # kernel1 cols
+                combined[i:i+3, j:j+3] += kernel1[i,j] * kernel2
+        
+        # normalize while preserving sign
+        sum_abs = np.sum(np.abs(combined))
+        return combined / sum_abs if sum_abs != 0 else combined
+    
+    @staticmethod
+    def img_diff(image1, image2):
+        return cv2.absdiff(image1, image2)
