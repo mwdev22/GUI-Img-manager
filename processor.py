@@ -107,6 +107,10 @@ class ImageProcessor:
     def is_rgb(image):
         # check if the image is 3D and has 3 channels
         return image.ndim == 3 and image.shape[2] == 3
+    
+    @staticmethod
+    def is_binary(image):
+        return image.ndim == 2 and np.array_equal(np.unique(image), [0, 255])
 
     # conversions   
     def to_grayscale(self, cv2_image):
@@ -419,3 +423,63 @@ class ImageProcessor:
     @staticmethod
     def img_diff(image1, image2):
         return cv2.absdiff(image1, image2)
+    
+    
+# ----------------- MORPHOLOGY OPERATIONS -------------------
+
+    @staticmethod
+    def binarize(image, threshold=127):
+        _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+        return binary
+
+    @staticmethod
+    def get_rhombus_kernel(size=3):
+        if size % 2 == 0:
+            raise ValueError("Rozmiar kernela musi być nieparzysty")
+        
+        radius = size // 2
+        kernel = np.zeros((size, size), np.uint8)
+        
+        for i in range(size):
+            for j in range(size):
+                if abs(i - radius) + abs(j - radius) <= radius:
+                    kernel[i, j] = 1
+        return kernel
+
+    @staticmethod
+    def get_square_kernel(size=3):
+        return np.ones((size, size), np.uint8)
+    
+    def morph_operation(self, image, operation='erosion', kernel_type='rhombus', kernel_size=3, 
+        border_type=cv2.BORDER_CONSTANT, border_value=0):
+        
+        if not self.is_binary(image):
+            raise ValueError("Obraz musi być zbinarnyzowany.")
+        
+        if kernel_type == 'rhombus':
+            kernel = self.get_rhombus_kernel(kernel_size)
+        elif kernel_type == 'square':
+            kernel = self.get_square_kernel(kernel_size)
+        else:
+            raise ValueError("Zły typ kernela. Wybierz 'rhombus' lub 'square'")
+        
+        res = getattr(self, operation)(image, kernel, border_type=border_type, border_value=border_value)
+        if res is None:
+            raise ValueError(f"Zła operacja: {operation}. Wybierz 'erode', 'dilate', 'open', lub 'close'")
+        return res
+    
+    @staticmethod
+    def dilate(image, kernel, border_type=cv2.BORDER_CONSTANT, border_value=0):
+        return cv2.dilate(image, kernel, iterations=1, borderType=border_type, borderValue=border_value)
+
+    @staticmethod
+    def erode(image, kernel, border_type=cv2.BORDER_CONSTANT, border_value=0):
+        return cv2.erode(image, kernel, iterations=1, borderType=border_type, borderValue=border_value)
+    
+    @staticmethod
+    def open(image, kernel,border_type=cv2.BORDER_CONSTANT, border_value=0):
+        return cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel, borderType=border_type, borderValue=border_value)
+
+    @staticmethod
+    def close(image, kernel,border_type=cv2.BORDER_CONSTANT, border_value=0):
+        return cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, borderType=border_type, borderValue=border_value)

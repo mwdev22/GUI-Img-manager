@@ -24,7 +24,6 @@ class GUI:
 
         self.mount_menu()
         
-        # frame to hold the image label
         frame = Frame(self.root)
         frame.pack(fill="both", expand=True)
 
@@ -36,6 +35,7 @@ class GUI:
         self.windows = {
             self.root : WindowContext(self.root, image_label, None, frame=frame, processor=self.processor)
         }
+        
         
         self.context = self.windows[self.root]
         image_label.bind("<Button-1>", lambda event, root=self.root: self.set_current_image(root))
@@ -68,8 +68,10 @@ class GUI:
         file_menu = self.create_file_menu(menubar)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
-        process_menu = self.create_process_menu(menubar)
+        process_menu, morph_menu, neigh_menu = self.create_process_menus(menubar)
         menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
+        menubar.add_cascade(label="Morfologia", menu=morph_menu)
+        menubar.add_cascade(label="Operacje Sąsiedztwa", menu=neigh_menu)
 
     def create_file_menu(self, menubar):
         file_menu = Menu(menubar, tearoff=0)
@@ -78,9 +80,10 @@ class GUI:
         file_menu.add_command(label="Zamknij", command=self.root.quit)
         return file_menu
 
-    def create_process_menu(self, menubar):
+    def create_process_menus(self, menubar):
         process_menu = Menu(menubar, tearoff=0)
         process_menu.add_command(label="Skaluj do odcieni szarości", command=self.apply_grayscale)
+        process_menu.add_command(label="Binaryzacja", command=self.apply_binarization)
         process_menu.add_command(label="Histogram", command=self.show_histogram)
         process_menu.add_command(label="Konwersja HSV", command=self.apply_hsv)
         process_menu.add_command(label="Konwersja LAB", command=self.apply_lab)
@@ -97,7 +100,7 @@ class GUI:
         point_op_menu.add_command(label="Posteryzacja", command=self.apply_posterization)
         process_menu.add_cascade(label="Operacje punktowe", menu=point_op_menu)
         
-        neighboorhood_op_menu = Menu(process_menu, tearoff=0)
+        neighboorhood_op_menu = Menu(menubar, tearoff=0)
         neighboorhood_op_menu.add_command(label="Bliur", command=lambda: self.dispatch_neighborhood('blur'))
         neighboorhood_op_menu.add_command(label="Gaussian Blur", command=lambda: self.dispatch_neighborhood('gaussian_blur'))
         neighboorhood_op_menu.add_command(label="Laplacian", command=lambda: self.dispatch_neighborhood('laplacian', ask_border=True))
@@ -108,13 +111,19 @@ class GUI:
         neighboorhood_op_menu.add_command(label="Wyostrzanie liniowe (Laplacian)", command=self.apply_sharpen_laplacian)
         neighboorhood_op_menu.add_command(label="Filtracja Medianowa", command=self.apply_median_filter)
         
-        process_menu.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
         process_menu.add_command(label="Operacje Dwuargumentowe", command=self.perform_two_arg_operation)
         
         process_menu.add_command(label="Filtracja 2 oraz 1 etapowa (porownanie)", command=self.compare_filtering_methods)
+
+        morphology_menu = Menu(menubar, tearoff=0)
+        morphology_menu.add_command(label="Erozja", command=lambda: self.dispatch_morphology('erode'))
+        morphology_menu.add_command(label="Dylatacja", command=lambda: self.dispatch_morphology('dilate'))
+        morphology_menu.add_command(label="Otwarcie", command=lambda: self.dispatch_morphology('open'))
+        morphology_menu.add_command(label="Zamknięcie", command=lambda: self.dispatch_morphology('close'))
+        
         
 
-        return process_menu
+        return process_menu, morphology_menu, neighboorhood_op_menu
     # --------- END OF MENU -------------------
 
     # --------- USER INTERACTIONS -------------
@@ -169,6 +178,62 @@ class GUI:
             if window.title() == title:
                 return self.windows[window]
         return 
+    
+    def morphology_dialog(self):
+        dialog = self._create_centered_dialog("Parametry morfologii")
+        
+        
+        kernel_var = StringVar(value='rhombus')
+        kernel_map = {
+            'rhombus': 'Romb',
+            'square': 'Kwadrat'
+        }
+        Label(dialog, text="Element strukturalny:").pack(pady=5)
+        for kernel, name in kernel_map.items():
+            Radiobutton(dialog, text=name, variable=kernel_var, value=kernel).pack(anchor=W)
+        
+        Label(dialog, text="Rozmiar elementu (nieparzysty):").pack(pady=5)
+        size_entry = Entry(dialog)
+        size_entry.pack()
+        size_entry.insert(0, "3")
+        
+        border_var = StringVar(value='constant')
+        Label(dialog, text="Obsługa brzegu:").pack(pady=5)
+        borders = {
+            'constant': 'Stała wartość (0)',
+            'replicate': 'Replikacja',
+            'reflect': 'Odbicie',
+            'reflect_101': 'Odbicie (bez krawędzi)',
+            'wrap': 'Zawinięcie'
+        }
+        for code, name in borders.items():
+            Radiobutton(dialog, text=name, variable=border_var, value=code).pack(anchor=W)
+        
+        result = None
+        
+        def on_ok():
+            nonlocal result
+            try:
+                size = int(size_entry.get())
+                if size <= 0 or size % 2 == 0:
+                    raise ValueError("Rozmiar musi być dodatnią liczbą nieparzystą")
+                
+                result = {
+                    'kernel_type': kernel_var.get(),
+                    'kernel_size': size,
+                    'border_type': getattr(cv2, f'BORDER_{border_var.get().upper()}'),
+                    'border_value': 0
+                }
+                dialog.destroy()
+            except ValueError as e:
+                messagebox.showerror("Błąd", str(e))
+        
+        self._add_ok_cancel_buttons(dialog, on_ok)
+        self._center_dialog(dialog)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return result
     
     def select_second_image_dialog(self):
         if len(self.windows) < 2:
@@ -685,6 +750,42 @@ class GUI:
         )
         
         messagebox.showinfo("Statystyki porównania", stats_msg)
+    
+    @image_required
+    def dispatch_morphology(self, operation):
+        params = self.morphology_dialog()
+        if not params:
+            return
+        try:
+            if not self.processor.is_binary(self.context.image):
+                messagebox.showerror("Błąd", "Operacje morfologiczne działają tylko na obrazach binarnych.")
+                return
+            result = self.processor.morph_operation(
+                self.context.image,
+                operation=operation,
+                kernel_type=params['kernel_type'],
+                kernel_size=params['kernel_size'],
+                border_type=params['border_type'],
+                border_value=params['border_value']
+            )
+            
+            self.context.image = result
+            self.context.display_current_image()
+            
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Operacja morfologiczna nie powiodła się: {str(e)}")
+            
+    @image_required
+    def apply_binarization(self):
+        if not self.processor.is_grayscale(self.context.image):
+            self.show_error("Błąd", "Binarizacja działa tylko na obrazach w odcieniach szarości.")
+            return
+        threshold = self.ask_for_input_int("Binarizacja", "Podaj próg (0-255):")
+        if threshold is None:
+            return
+        binarized_image = self.processor.binarize(self.context.image, threshold)
+        self.context.image = binarized_image
+        self.context.display_current_image()
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
