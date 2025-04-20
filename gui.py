@@ -68,10 +68,10 @@ class GUI:
         file_menu = self.create_file_menu(menubar)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
-        process_menu, morph_menu, neigh_menu = self.create_process_menus(menubar)
+        process_menu, adv_menu, neigh_menu = self.create_process_menus(menubar)
         menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
-        menubar.add_cascade(label="Morfologia", menu=morph_menu)
-        menubar.add_cascade(label="Operacje Sąsiedztwa", menu=neigh_menu)
+        menubar.add_cascade(label="Operacje sąsiedztwa", menu=neigh_menu)
+        menubar.add_cascade(label="Operacje zaawansowane", menu=adv_menu)
 
     def create_file_menu(self, menubar):
         file_menu = Menu(menubar, tearoff=0)
@@ -115,15 +115,21 @@ class GUI:
         
         process_menu.add_command(label="Filtracja 2 oraz 1 etapowa (porownanie)", command=self.compare_filtering_methods)
 
-        morphology_menu = Menu(menubar, tearoff=0)
+
+        advanced_menu = Menu(menubar, tearoff=0)
+        
+        morphology_menu = Menu(advanced_menu, tearoff=0)
         morphology_menu.add_command(label="Erozja", command=lambda: self.dispatch_morphology('erode'))
         morphology_menu.add_command(label="Dylatacja", command=lambda: self.dispatch_morphology('dilate'))
         morphology_menu.add_command(label="Otwarcie", command=lambda: self.dispatch_morphology('open'))
         morphology_menu.add_command(label="Zamknięcie", command=lambda: self.dispatch_morphology('close'))
         
+        advanced_menu.add_cascade(label="Operacje Morfologiczne", menu=morphology_menu)
+        advanced_menu.add_command(label="Szkieletyzacja", command=self.apply_skeletonization)
+        
         
 
-        return process_menu, morphology_menu, neighboorhood_op_menu
+        return process_menu, advanced_menu, neighboorhood_op_menu
     # --------- END OF MENU -------------------
 
     # --------- USER INTERACTIONS -------------
@@ -777,15 +783,43 @@ class GUI:
             
     @image_required
     def apply_binarization(self):
-        if not self.processor.is_grayscale(self.context.image):
-            self.show_error("Błąd", "Binarizacja działa tylko na obrazach w odcieniach szarości.")
-            return
+        image = self.context.image
+        if not self.processor.is_grayscale(image):
+            image = self.processor.to_grayscale(image)
         threshold = self.ask_for_input_int("Binarizacja", "Podaj próg (0-255):")
+        
         if threshold is None:
             return
-        binarized_image = self.processor.binarize(self.context.image, threshold)
+        binarized_image = self.processor.binarize(image, threshold)
         self.context.image = binarized_image
         self.context.display_current_image()
+        
+    @image_required
+    def apply_skeletonization(self):
+        """Apply skeletonization to the current image"""
+        try:
+            if not self.processor.is_binary(self.context.image):
+                messagebox.showerror("Błąd", "Szkieletyzacja działa tylko na obrazach binarnych.")
+                return
+            binary_img = self.processor.binarize(self.context.image)
+            
+            border_type = self.ask_border_dialog()
+            if border_type is None:
+                return
+            
+            max_iters = self.ask_for_input_int("Szkieletyzacja", "Podaj maksymalną ilość iteracji):")
+                
+            skeleton = self.processor.skeletonize(
+                binary_img,
+                border_type=BORDER_TYPES[border_type],
+                max_iterations=max_iters
+            )
+            
+            self.context.image = skeleton
+            self.context.display_current_image()
+            
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Szkieletyzacja nie powiodła się: {str(e)}")
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
@@ -875,8 +909,6 @@ class WindowContext:
         new_height = min(h + margin_h, self.max_height)
         
         self.root.geometry(f"{new_width}x{new_height}")
-
-
 
 
 

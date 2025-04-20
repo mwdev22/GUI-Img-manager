@@ -483,3 +483,43 @@ class ImageProcessor:
     @staticmethod
     def close(image, kernel,border_type=cv2.BORDER_CONSTANT, border_value=0):
         return cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, borderType=border_type, borderValue=border_value)
+    
+    @staticmethod
+    def skeletonize(image, border_type=cv2.BORDER_CONSTANT, max_iterations=100):
+
+        if image.dtype != np.uint8:
+            image = image.astype(np.uint8)
+            
+        if np.mean(image) > 127:
+            image = 255 - image
+            
+        skeleton = image.copy()
+        prev_skeleton = np.zeros_like(skeleton)
+        
+        kernel1 = np.array([[0, 0, 0],
+                           [-1, 1, -1],
+                           [1, 1, 1]], dtype=np.int8)
+        
+        kernel2 = np.array([[-1, 0, 0],
+                           [1, 1, 0],
+                           [-1, 1, -1]], dtype=np.int8)
+        
+        iteration = 0
+        while iteration < max_iterations:
+            iteration += 1
+            prev_skeleton[:] = skeleton
+            
+            hitmiss1 = cv2.morphologyEx(skeleton, cv2.MORPH_HITMISS, kernel1, 
+                                      borderType=border_type)
+            skeleton = skeleton - hitmiss1
+            
+            hitmiss2 = cv2.morphologyEx(skeleton, cv2.MORPH_HITMISS, kernel2, 
+                                      borderType=border_type)
+            skeleton = skeleton - hitmiss2
+            
+            if np.all(skeleton == prev_skeleton):
+                break
+                
+        skeleton = 255 - skeleton
+        
+        return skeleton
