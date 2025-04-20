@@ -1,4 +1,4 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar
+from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar, BOTH, E, END, EW
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
@@ -126,6 +126,7 @@ class GUI:
         
         advanced_menu.add_cascade(label="Operacje Morfologiczne", menu=morphology_menu)
         advanced_menu.add_command(label="Szkieletyzacja", command=self.apply_skeletonization)
+        advanced_menu.add_command(label="Detekcja krawędzi (Hough)", command=self.detect_lines_hough)
         
         
 
@@ -184,6 +185,98 @@ class GUI:
             if window.title() == title:
                 return self.windows[window]
         return 
+    
+    def hough_params_dialog(self):
+        
+        dialog = self._create_centered_dialog("Parametry Hougha")
+        main_frame = Frame(dialog, padx=10, pady=10)
+        main_frame.pack(fill=BOTH, expand=True)
+        
+        main_frame.grid_columnconfigure(1, weight=1)
+        
+        params = [
+            {'name': 'rho', 'label': "Rozdzielczość odległości (piksele):", 
+            'default': 1, 'type': 'int', 'min': 1},
+            {'name': 'theta', 'label': "Rozdzielczość kąta (stopnie):", 
+            'default': 1.0, 'type': 'float', 'min': 0.1},
+            {'name': 'threshold', 'label': "Próg akumulatora:", 
+            'default': 100, 'type': 'int', 'min': 1},
+            {'name': 'min_line_length', 'label': "Min. długość linii (piksele):", 
+            'default': 50, 'type': 'int', 'min': 1},
+            {'name': 'max_line_gap', 'label': "Maks. przerwa w linii (piksele):", 
+            'default': 10, 'type': 'int', 'min': 0}
+        ]
+        
+        entries = {}
+        
+        for row, param in enumerate(params):
+            Label(main_frame, text=param['label']).grid(
+                row=row, column=0, padx=5, pady=5, sticky=E)
+            
+            entry = Entry(main_frame)
+            entry.grid(row=row, column=1, padx=5, pady=5, sticky=EW)
+            entry.insert(0, str(param['default']))
+            entries[param['name']] = entry
+        
+        border_var = StringVar(value='default')
+        border_row = len(params)
+        
+        Label(main_frame, text="Metoda obsługi brzegów:").grid(
+            row=border_row, column=0, padx=5, pady=5, sticky=E)
+        
+        border_frame = Frame(main_frame)
+        border_frame.grid(row=border_row, column=1, sticky=W)
+        
+        for btype in BORDER_TYPES:
+            Radiobutton(
+                border_frame, 
+                text=btype, 
+                variable=border_var, 
+                value=btype
+            ).pack(side=LEFT, padx=2)
+        
+        button_frame = Frame(dialog)
+        button_frame.pack(pady=(0, 10))
+        
+        result = None
+        
+        def validate_and_accept():
+            nonlocal result
+            try:
+                params_dict = {}
+                for param in params:
+                    value = entries[param['name']].get()
+                    
+                    if param['type'] == 'int':
+                        value = int(value)
+                    elif param['type'] == 'float':
+                        value = float(value)
+                    
+                    if value < param['min']:
+                        raise ValueError(f"{param['label']} musi być ≥ {param['min']}")
+                    
+                    params_dict[param['name']] = value
+                
+                params_dict['theta'] *= np.pi/180
+                
+                params_dict['border_type'] = BORDER_TYPES[border_var.get()]
+                result = params_dict
+                dialog.destroy()
+                
+            except ValueError as e:
+                self.show_error("Błąd parametrów", str(e))
+                return
+        
+        Button(button_frame, text="OK", command=validate_and_accept, width=10).pack(
+            side=LEFT, padx=5)
+        Button(button_frame, text="Anuluj", command=dialog.destroy, width=10).pack(
+            side=LEFT, padx=5)
+        
+        self._center_dialog(dialog)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return result
     
     def morphology_dialog(self):
         dialog = self._create_centered_dialog("Parametry morfologii")
@@ -526,7 +619,7 @@ class GUI:
 
             if file_path:
                 self.processor.save_histogram(file_path, histogram)
-                messagebox.showinfo("Sukces", f"Histogram zapisany w {file_path}")
+                self.show_message("Sukces", f"Histogram zapisany w {file_path}")
         
 
     @image_required
@@ -615,7 +708,7 @@ class GUI:
             self.context.display_current_image()
             
         except Exception as e:
-            messagebox.showerror("Błąd", f"Błąd operacji {mode}: {str(e)}")
+            self.show_error("Błąd", f"Błąd operacji {mode}: {str(e)}")
 
     @image_required
     def apply_sharpen_laplacian(self):
@@ -625,7 +718,7 @@ class GUI:
                 return
             results = self.processor.sharpen_linear_laplacian(self.context.image, border_type=selected_border)
             if not results:
-                messagebox.showwarning("Błąd", "Brak rezultatu z processingu.")
+                self.show_error("Błąd", "Brak rezultatu z processingu.")
                 return
                 
             for i, img in enumerate(results):
@@ -633,7 +726,7 @@ class GUI:
                                     self.processor.convert_to_tkimage(img), 
                                     img)
         except Exception as e:
-            messagebox.showerror("Błąd", f"Błąd przy wyostrzaniu Laplacianem: {str(e)}")
+            self.show_error("Błąd", f"Błąd przy wyostrzaniu Laplacianem: {str(e)}")
             
     @image_required
     def apply_prewitt(self):
@@ -668,10 +761,9 @@ class GUI:
             self.context.display_current_image()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Median filtering failed: {str(e)}")
+            self.show_error("Error", f"Median filtering failed: {str(e)}")
     @image_required
     def perform_two_arg_operation(self):
-        """Perform two-argument operation between current image and selected image"""
         selection = self.select_second_image_dialog()
         if not selection:
             return
@@ -680,7 +772,7 @@ class GUI:
         second_context = self.find_window_by_title(selected_window_ref)
         
         if second_context is None or second_context.image is None:
-            messagebox.showerror("Błąd", "Wybrany obraz jest pusty lub okno zostało zamknięte.")
+            self.show_error("Błąd", "Wybrany obraz jest pusty lub okno zostało zamknięte.")
             return
         try:
             image1 = self.context.image
@@ -688,7 +780,7 @@ class GUI:
             print(image1.shape, image2.shape)
             
             if image1.shape != image2.shape:
-                messagebox.showerror("Błąd", "Obrazy muszą mieć te same wymiary.")
+                self.show_error("Błąd", "Obrazy muszą mieć te same wymiary.")
                 return
             
             args = {'image1': image1, 'image2': image2}
@@ -703,7 +795,7 @@ class GUI:
                 self.context.display_current_image()
                 
         except Exception as e:
-            messagebox.showerror("Błąd", f"Operacja nie powiodła się: {str(e)}")
+            self.show_error("Błąd", f"Operacja nie powiodła się: {str(e)}")
             
     @image_required
     def compare_filtering_methods(self):
@@ -755,7 +847,7 @@ class GUI:
             f"Odchylenie standardowe: {diff_std:.2f}"
         )
         
-        messagebox.showinfo("Statystyki porównania", stats_msg)
+        self.show_message("Statystyki porównania", stats_msg)
     
     @image_required
     def dispatch_morphology(self, operation):
@@ -764,7 +856,7 @@ class GUI:
             return
         try:
             if not self.processor.is_binary(self.context.image):
-                messagebox.showerror("Błąd", "Operacje morfologiczne działają tylko na obrazach binarnych.")
+                self.show_error("Błąd", "Operacje morfologiczne działają tylko na obrazach binarnych.")
                 return
             result = self.processor.morph_operation(
                 self.context.image,
@@ -779,7 +871,7 @@ class GUI:
             self.context.display_current_image()
             
         except Exception as e:
-            messagebox.showerror("Błąd", f"Operacja morfologiczna nie powiodła się: {str(e)}")
+            self.show_error("Błąd", f"Operacja morfologiczna nie powiodła się: {str(e)}")
             
     @image_required
     def apply_binarization(self):
@@ -796,10 +888,9 @@ class GUI:
         
     @image_required
     def apply_skeletonization(self):
-        """Apply skeletonization to the current image"""
         try:
             if not self.processor.is_binary(self.context.image):
-                messagebox.showerror("Błąd", "Szkieletyzacja działa tylko na obrazach binarnych.")
+                self.show_error("Błąd", "Szkieletyzacja działa tylko na obrazach binarnych.")
                 return
             binary_img = self.processor.binarize(self.context.image)
             
@@ -819,7 +910,36 @@ class GUI:
             self.context.display_current_image()
             
         except Exception as e:
-            messagebox.showerror("Błąd", f"Szkieletyzacja nie powiodła się: {str(e)}")
+            self.show_error("Błąd", f"Szkieletyzacja nie powiodła się: {str(e)}")
+
+    @image_required
+    def detect_lines_hough(self):
+        try:
+            if not self.processor.is_grayscale(self.context.image):
+                self.show_error("Błąd", "Detekcja linii wymaga obrazu w odcieniach szarości.")
+                return
+            
+            params = self.hough_params_dialog()
+            if not params:
+                return
+                
+            result = self.processor.detect_lines(
+                self.context.image,
+                rho=params['rho'],
+                theta=params['theta'],
+                threshold=params['threshold'],
+                min_line_length=params['min_line_length'],
+                max_line_gap=params['max_line_gap'],
+                border_type=params['border_type']
+            )
+            
+            # Show result in new window
+            self.show_new_window("Detekcja linii", 
+                               self.processor.convert_to_tkimage(result), 
+                               result)
+            
+        except Exception as e:
+            self.show_error("Błąd", f"Detekcja linii nie powiodła się: {str(e)}")
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):

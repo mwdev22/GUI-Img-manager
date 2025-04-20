@@ -89,19 +89,19 @@ class ImageProcessor:
 
     @staticmethod
     def convert_tkimage_to_opencv(tk_image: ImageTk.PhotoImage):
-        """
-        Convert Tkinter PhotoImage to OpenCV compatible BGR format.
-        """
-        # Convert Tkinter PhotoImage to RGB format
-        
+  
         image = np.array(tk_image)
-        # Convert RGB to BGR for OpenCV compatibility
         return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     
     # check if img is 2D
     @staticmethod
     def is_grayscale(image):
         return image.ndim == 2
+    
+    @staticmethod
+    def binarize(image, threshold=127):
+        _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+        return binary
     
     @staticmethod
     def is_rgb(image):
@@ -427,10 +427,7 @@ class ImageProcessor:
     
 # ----------------- MORPHOLOGY OPERATIONS -------------------
 
-    @staticmethod
-    def binarize(image, threshold=127):
-        _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
-        return binary
+    
 
     @staticmethod
     def get_rhombus_kernel(size=3):
@@ -484,6 +481,11 @@ class ImageProcessor:
     def close(image, kernel,border_type=cv2.BORDER_CONSTANT, border_value=0):
         return cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, borderType=border_type, borderValue=border_value)
     
+   
+    
+# ----------------- ADVANCED OPERATIONS -------------------
+
+
     @staticmethod
     def skeletonize(image, border_type=cv2.BORDER_CONSTANT, max_iterations=100):
 
@@ -523,3 +525,33 @@ class ImageProcessor:
         skeleton = 255 - skeleton
         
         return skeleton
+
+    @staticmethod
+    def detect_lines(image, 
+                    rho=1, 
+                    theta=np.pi/180, 
+                    threshold=100,
+                    min_line_length=50,
+                    max_line_gap=10,
+                    border_type=cv2.BORDER_DEFAULT):
+        
+        if len(image.shape) == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        edges = cv2.Canny(image, 50, 150, apertureSize=3, L2gradient=True)
+        
+        lines = cv2.HoughLinesP(edges, rho, theta, threshold,
+                               minLineLength=min_line_length,
+                               maxLineGap=max_line_gap)
+        
+        if len(image.shape) == 2:
+            output = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        else:
+            output = image.copy()
+        
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(output, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                
+        return output 
