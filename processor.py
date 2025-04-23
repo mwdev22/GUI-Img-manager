@@ -12,8 +12,11 @@ BORDER_TYPES = {
     "replicate": cv2.BORDER_REPLICATE,
     # "constant": cv2.BORDER_CONSTANT,
     # "wrap": cv2.BORDER_WRAP,
-    "default": cv2.BORDER_DEFAULT
+    "default": cv2.BORDER_DEFAULT,
+    "isolated": cv2.BORDER_ISOLATED,
 }
+
+
 
 LAPLACIAN_MASKS = [
     np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]]),
@@ -555,3 +558,46 @@ class ImageProcessor:
                 cv2.line(output, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 
         return output 
+    
+    def show_profile_line(self,img,  x1, y1, x2, y2):
+        num = int(np.hypot(x2-x1, y2-y1))
+        x, y = np.linspace(x1, x2, num), np.linspace(y1, y2, num)
+        
+        values = img[y.astype(int), x.astype(int)]
+        
+        plt.figure(figsize=(10, 4))
+        
+        if self.is_grayscale(img):
+            plt.plot(values, 'k-', linewidth=2)
+            plt.title("Linia Profilu")
+        else:
+            plt.plot(values[:, 0], 'b-', label='Blue', linewidth=2)
+            plt.plot(values[:, 1], 'g-', label='Green', linewidth=2)
+            plt.plot(values[:, 2], 'r-', label='Red', linewidth=2)
+            plt.legend()
+            plt.title("Linia Profilu (RGB)")
+        
+        plt.xlabel("Pozycja wzdłuż linii")
+        plt.ylabel("Wartość intensywności")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    @staticmethod
+    def build_image_pyramid(image, levels_up=2, levels_down=2):
+        pyramid = []
+        for i in range(1, levels_up + 1):
+            scale = 2 ** i
+            enlarged = cv2.resize(image, None, fx=scale, fy=scale, 
+                                 interpolation=cv2.INTER_LINEAR)
+            pyramid.append(enlarged)
+        
+        # pyramid.append(image.copy())
+        
+        for i in range(1, levels_down + 1):
+            scale = 1 / (2 ** i)
+            reduced = cv2.resize(image, None, fx=scale, fy=scale, 
+                                interpolation=cv2.INTER_AREA)
+            pyramid.append(reduced)
+            
+        return pyramid

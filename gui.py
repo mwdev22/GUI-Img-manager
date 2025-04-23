@@ -38,7 +38,11 @@ class GUI:
         
         
         self.context = self.windows[self.root]
-        image_label.bind("<Button-1>", lambda event, root=self.root: self.set_current_image(root))
+        
+        self.profile_points = []
+        self.profile_line_active = False
+        
+        self.root.bind("<Button-1>", lambda event, root=self.root: self.dispatch_click_handler(event, root))
         
         
     # helper decorator for operations
@@ -127,6 +131,8 @@ class GUI:
         advanced_menu.add_cascade(label="Operacje Morfologiczne", menu=morphology_menu)
         advanced_menu.add_command(label="Szkieletyzacja", command=self.apply_skeletonization)
         advanced_menu.add_command(label="Detekcja krawędzi (Hough)", command=self.detect_lines_hough)
+        advanced_menu.add_command(label="Linia Profilu", command=self.start_profile_line)
+        advanced_menu.add_command(label="Piramida obrazów", command=self.show_image_pyramid)
         
         
 
@@ -411,13 +417,13 @@ class GUI:
         
         return result
 
-    def ask_border_dialog(self):
+    def ask_border_dialog(self, borders=BORDER_TYPES):
         dialog = self._create_centered_dialog("Wybierz typ obramowania")
         
         selected_border = StringVar(value="default")
         Label(dialog, text="Wybor obramowania").pack(pady=5)
         
-        for name in BORDER_TYPES:
+        for name in borders:
             Radiobutton(
                 dialog,
                 text=name,
@@ -548,8 +554,16 @@ class GUI:
         ctx.label.bind("<Button-1>", lambda event, root=ctx.root: self.set_current_image(root))
         self.context.adjust_window_size()
         self.context.display_current_image()
+        
+    def dispatch_click_handler(self, event, root):
+        if self.profile_line_active:
+            self.handle_profile_line_click(event)
+        else:
+            self.set_current_image(root)
 
     def set_current_image(self, root):
+        if self.profile_line_active:
+            return
         context = self.windows.get(root)
         if context:
             self.context = context
@@ -576,8 +590,8 @@ class GUI:
         context = self.windows[new_window] = WindowContext(new_window, label, channel_image, frame, self.processor)
         self.context.adjust_window_size()
         self.context.display_current_image()
-        new_window.bind("<Configure>", lambda e, ctx=context: ctx.on_window_resize(e))
-        label.bind("<Button-1>", lambda event, root=new_window: self.set_current_image(root))
+        # new_window.bind("<Configure>", lambda e, ctx=context: ctx.on_window_resize(e))
+        new_window.bind("<Button-1>", lambda event, root=new_window: self.dispatch_click_handler(event, root))
 
     @image_required
     def apply_grayscale(self):
@@ -940,6 +954,46 @@ class GUI:
             
         except Exception as e:
             self.show_error("Błąd", f"Detekcja linii nie powiodła się: {str(e)}")
+            
+    @image_required
+    def start_profile_line(self):
+        self.profile_points = []
+        self.profile_line_active = True
+        self.show_message("Linia profilu", "Naciśnij dwa punkty na obrazie, aby utworzyć linię profilu.")
+
+    def handle_profile_line_click(self, event):
+        if not self.profile_line_active:
+            return
+        
+        x = event.x - self.context.label.winfo_x()
+        y = event.y - self.context.label.winfo_y()
+        
+        self.profile_points.append((x, y))
+        
+        if len(self.profile_points) == 2:
+            self.show_profile_line()
+            self.profile_line_active = False
+
+    def show_profile_line(self):
+        img = self.context.image
+        
+        x1, y1 = self.profile_points[0]
+        x2, y2 = self.profile_points[1]
+        
+        self.processor.show_profile_line(img,x1, y1, x2, y2)  
+
+    @image_required
+    def show_image_pyramid(self):
+        pyramid = self.processor.build_image_pyramid(self.context.image)
+        
+        for i, level_img in enumerate(pyramid):
+            scale_factors = [4, 2, 1, 0.5, 0.25]  
+            title = f"Piramida: {scale_factors[i]}x"
+            self.show_new_window(title, 
+                               self.processor.convert_to_tkimage(level_img), 
+                               level_img)
+        
+        
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
@@ -954,11 +1008,14 @@ class WindowContext:
         self.image: Union[np.ndarray, None] = image
         self.og_image: Union[np.ndarray, None] = image.copy() if image is not None else None
         self.img_frame: Frame = frame
-        self.tk_image: Union[ImageTk.PhotoImage, None]  = None
+        self.tk_image: Union[ImageTk.PhotoImage, None] = None
         self.processor = processor
-        self.max_width = 1200
-        self.max_height = 900
-        self.root.geometry("800x600")  
+        
+        self.root.geometry("400x400")  
+        
+        if image is not None:
+            self.adjust_window_size()
+            self.display_current_image()
         
     @staticmethod
     def find_window_by_title(gui: GUI, title):
@@ -967,68 +1024,32 @@ class WindowContext:
                 return window
         return None
     
-    def on_window_resize(self, event):
-            
-        # get current window size (accounting for decorations)
-        width = max(self.root.winfo_width(), 1)
-        height = max(self.root.winfo_height(), 1)
-            
-        self.display_current_image(width, height)
+
     
     def display_current_image(self, width=None, height=None):
         if self.image is None:
             return
             
-        # get current dimensions if not provided
-        if width is None:
-            width = max(self.root.winfo_width(), 1)
-        if height is None:
-            height = max(self.root.winfo_height(), 1)
-
-        resized = self.resize_image_to_fit(self.image, width, height)
-        tk_image = self.processor.convert_to_tkimage(resized)
-
+        tk_image = self.processor.convert_to_tkimage(self.image)
+        
         self.tk_image = tk_image
         self.label.config(image=tk_image)
         self.label.image = tk_image
         
+        self.adjust_window_size()
     
-    def resize_image_to_fit(self, image, width, height):
-        # ensure minimum dimensions
-        width = max(width, 1)
-        height = max(height, 1)
-        
-        h, w = image.shape[:2]
-        
-        # calculate aspect ratios
-        img_ratio = w / h
-        win_ratio = width / height
-        
-        if img_ratio > win_ratio:
-            # image is wider relative to window
-            new_width = width
-            new_height = int(width / img_ratio)
-        else:
-            new_height = height
-            new_width = int(height * img_ratio)
-            
-        new_width = max(new_width, 1)
-        new_height = max(new_height, 1)
-        
-        resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-        return resized
-
     def adjust_window_size(self):
         if self.image is None:
             return
             
         h, w = self.image.shape[:2]
-        margin_w = 50
-        margin_h = 80
-        new_width = min(w + margin_w, self.max_width)
-        new_height = min(h + margin_h, self.max_height)
         
-        self.root.geometry(f"{new_width}x{new_height}")
+        window_width = w + (self.root.winfo_width() - self.label.winfo_width())
+        window_height = h + (self.root.winfo_height() - self.label.winfo_height())
+        
+        self.root.geometry(f"{window_width}x{window_height}")
+        
+        self.root.minsize(window_width, window_height)
 
 
 
