@@ -1,4 +1,4 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar, BOTH, E, END, EW
+from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
@@ -72,10 +72,8 @@ class GUI:
         file_menu = self.create_file_menu(menubar)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
-        process_menu, adv_menu, neigh_menu = self.create_process_menus(menubar)
-        menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
-        menubar.add_cascade(label="Operacje sąsiedztwa", menu=neigh_menu)
-        menubar.add_cascade(label="Operacje zaawansowane", menu=adv_menu)
+        self.create_process_menus(menubar)
+        
 
     def create_file_menu(self, menubar):
         file_menu = Menu(menubar, tearoff=0)
@@ -84,7 +82,8 @@ class GUI:
         file_menu.add_command(label="Zamknij", command=self.root.quit)
         return file_menu
 
-    def create_process_menus(self, menubar):
+    def create_process_menus(self, menubar: Menu):
+        
         process_menu = Menu(menubar, tearoff=0)
         process_menu.add_command(label="Skaluj do odcieni szarości", command=self.apply_grayscale)
         process_menu.add_command(label="Binaryzacja", command=self.apply_binarization)
@@ -118,6 +117,15 @@ class GUI:
         process_menu.add_command(label="Operacje Dwuargumentowe", command=self.perform_two_arg_operation)
         
         process_menu.add_command(label="Filtracja 2 oraz 1 etapowa (porownanie)", command=self.compare_filtering_methods)
+        
+        
+        segmentation_menu = Menu(menubar, tearoff=0)
+        segmentation_menu.add_command(label="Ręczne progowanie",
+                                    command=self.manual_threshold)
+        segmentation_menu.add_command(label="Progowanie adaptacyjne",
+                                    command=self.adaptive_threshold)
+        segmentation_menu.add_command(label="Metoda Otsu",
+                                    command=self.apply_otsu_threshold)
 
 
         advanced_menu = Menu(menubar, tearoff=0)
@@ -133,10 +141,12 @@ class GUI:
         advanced_menu.add_command(label="Detekcja krawędzi (Hough)", command=self.detect_lines_hough)
         advanced_menu.add_command(label="Linia Profilu", command=self.start_profile_line)
         advanced_menu.add_command(label="Piramida obrazów", command=self.show_image_pyramid)
-        
-        
 
-        return process_menu, advanced_menu, neighboorhood_op_menu
+        menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
+        menubar.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
+        menubar.add_cascade(label="Operacje zaawansowane", menu=advanced_menu)
+        menubar.add_cascade(label="Segmentacja", menu=segmentation_menu)
+
     # --------- END OF MENU -------------------
 
     # --------- USER INTERACTIONS -------------
@@ -192,6 +202,10 @@ class GUI:
                 return self.windows[window]
         return 
     
+    
+
+    
+
     def hough_params_dialog(self):
         
         dialog = self._create_centered_dialog("Parametry Hougha")
@@ -947,7 +961,6 @@ class GUI:
                 border_type=params['border_type']
             )
             
-            # Show result in new window
             self.show_new_window("Detekcja linii", 
                                self.processor.convert_to_tkimage(result), 
                                result)
@@ -967,6 +980,7 @@ class GUI:
         
         x = event.x - self.context.label.winfo_x()
         y = event.y - self.context.label.winfo_y()
+        
         
         self.profile_points.append((x, y))
         
@@ -992,12 +1006,108 @@ class GUI:
             self.show_new_window(title, 
                                self.processor.convert_to_tkimage(level_img), 
                                level_img)
+
+    
+
+    @image_required
+    def apply_otsu_threshold(self):
+        segmented = self.processor.otsu_threshold(self.context.image)
+        self.apply_threshold_result(segmented)
+    
+    def apply_threshold_result(self, segmented_image):
+        self.context.image = segmented_image
+        self.context.display_current_image()
+    
+    @image_required
+    def manual_threshold(self):
+        dialog = Toplevel(self.root)
+        dialog.title("Ręczne progowanie")
+        dialog.resizable(False, False)
+        self._center_dialog(dialog)
+        
+        current_threshold = IntVar(value=127)
+        
+        def update_preview(_=None):
+            threshold = current_threshold.get()
+            segmented = self.processor.manual_threshold(self.context.image, threshold)
+            preview_img = self.processor.convert_to_tkimage(segmented)
+            preview_label.config(image=preview_img)
+            preview_label.image = preview_img
+        
+        scale = Scale(dialog, from_=0, to=255, orient=HORIZONTAL,
+                     variable=current_threshold, command=update_preview)
+        scale.pack(fill=X, padx=10, pady=5)
+        
+        preview_label = Label(dialog)
+        preview_label.pack()
+        
+        btn_frame = Frame(dialog)
+        btn_frame.pack(pady=5)
+        
+        Button(btn_frame, text="Zastosuj", 
+              command=lambda: self.apply_threshold_result(
+                  self.processor.manual_threshold(
+                      self.context.image, current_threshold.get()))
+              ).pack(side=LEFT, padx=5)
+        
+        Button(btn_frame, text="Anuluj", 
+              command=dialog.destroy).pack(side=LEFT, padx=5)
+        
+        update_preview()
+
+    @image_required
+    def adaptive_threshold(self):
+        dialog = Toplevel(self.root)
+        dialog.title("Progowanie adaptacyjne")
+        dialog.resizable(False, False)
+        self._center_dialog(dialog)
+        
+        block_size = IntVar(value=11)
+        C = IntVar(value=2)
+        
+        def update_preview():
+            bs = max(3, block_size.get() | 1) 
+            segmented = self.processor.adaptive_threshold(
+                self.context.image, bs, C.get())
+            preview_img = self.processor.convert_to_tkimage(segmented)
+            preview_label.config(image=preview_img)
+            preview_label.image = preview_img
+        
+        Frame(dialog).pack(pady=5)
+        
+        Label(dialog, text="Rozmiar bloku:").pack()
+        Scale(dialog, from_=3, to=51, orient=HORIZONTAL, 
+             variable=block_size, command=lambda _: update_preview()).pack()
+        
+        Label(dialog, text="Stała C:").pack()
+        Scale(dialog, from_=0, to=20, orient=HORIZONTAL,
+             variable=C, command=lambda _: update_preview()).pack()
+        
+        preview_label = Label(dialog)
+        preview_label.pack(pady=10)
+        
+        btn_frame = Frame(dialog)
+        btn_frame.pack(pady=5)
+        
+        Button(btn_frame, text="Zastosuj",
+              command=lambda: self.apply_threshold_result(
+                  self.processor.adaptive_threshold(
+                      self.context.image, 
+                      max(3, block_size.get() | 1), 
+                      C.get()))
+              ).pack(side=LEFT, padx=5)
+        
+        Button(btn_frame, text="Anuluj", 
+              command=dialog.destroy).pack(side=LEFT, padx=5)
+        
+        update_preview()
         
         
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):
         self.root.mainloop()
+
         
 
 # helper class to manage opened windows and images

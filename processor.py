@@ -601,3 +601,21 @@ class ImageProcessor:
             pyramid.append(reduced)
             
         return pyramid
+
+    @staticmethod
+    def manual_threshold(image, threshold):
+        _, segmented = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
+        return segmented
+
+    def adaptive_threshold(self, image, block_size=11, C=2):
+        if self.is_rgb(image):
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, block_size, C)
+
+    def otsu_threshold(self, image):
+        if self.is_rgb(image):
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, segmented = cv2.threshold(image, 0, 255, 
+                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return segmented
