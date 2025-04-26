@@ -1,13 +1,17 @@
-from tkinter import Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, Button, Entry, simpledialog, LEFT, StringVar, Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X
-from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import (
+    Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, 
+    Button, Entry, simpledialog, LEFT, StringVar, 
+    Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X
+)
+from PIL import ImageTk, Image
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union
-from processor import ImageProcessor, LAPLACIAN_MASKS, BORDER_TYPES
-from functools import wraps, partial
-from tkinter import messagebox
-
+from functools import wraps
+from processor import ImageProcessor, BORDER_TYPES
+import os
 
 
 class GUI:
@@ -79,6 +83,7 @@ class GUI:
         file_menu = Menu(menubar, tearoff=0)
         file_menu.add_command(label="Wczytaj obraz", command=self.open_file_dialog)
         file_menu.add_command(label="Resetuj obraz", command=self.reset_image)
+        file_menu.add_command(label="Kompresja RLE", command=self.apply_rle_compression)
         file_menu.add_command(label="Zamknij", command=self.root.quit)
         return file_menu
 
@@ -124,9 +129,11 @@ class GUI:
                                     command=self.manual_threshold)
         segmentation_menu.add_command(label="Progowanie adaptacyjne",
                                     command=self.adaptive_threshold)
-        segmentation_menu.add_command(label="Metoda Otsu",
+        segmentation_menu.add_command(label="Otsu",
                                     command=self.apply_otsu_threshold)
-
+        segmentation_menu.add_command(label="GrabCut", command=self.apply_grabcut)
+        segmentation_menu.add_command(label="Watershed", command=self.apply_watershed)
+        segmentation_menu.add_command(label="Inpainting", command=self.apply_inpainting)
 
         advanced_menu = Menu(menubar, tearoff=0)
         
@@ -998,16 +1005,53 @@ class GUI:
 
     @image_required
     def show_image_pyramid(self):
-        pyramid = self.processor.build_image_pyramid(self.context.image)
+        self.pyramid, self.pyramid_scales = self.processor.build_image_pyramid(self.context.image, levels_up=4, levels_down=4)
+        self.current_pyramid_level = len(self.pyramid_scales) // 2
+        self.show_message("Piramida Obrazow", "Użyj kółka myszy do przewijania poziomów piramidy.")
         
-        for i, level_img in enumerate(pyramid):
-            scale_factors = [4, 2, 1, 0.5, 0.25]  
-            title = f"Piramida: {scale_factors[i]}x"
-            self.show_new_window(title, 
-                               self.processor.convert_to_tkimage(level_img), 
-                               level_img)
+        self.pyramid_window = tk.Toplevel(self.root)
+        self.pyramid_window.title("Piramida Obrazow")
+        
+        
+        self.pyramid_window.resizable(False, False)
+        
+        self.pyramid_canvas = tk.Canvas(self.pyramid_window)
+        self.pyramid_canvas.pack(fill=tk.BOTH, expand=True)
+        
+        self.update_pyramid_display()
+        
+        self.pyramid_canvas.bind("<MouseWheel>", self.on_pyramid_scroll)
+        self.pyramid_canvas.bind("<Button-4>", self.on_pyramid_scroll)  
+        self.pyramid_canvas.bind("<Button-5>", self.on_pyramid_scroll)  
+        
+        self.pyramid_canvas.focus_set()
 
-    
+    def on_pyramid_scroll(self, event):
+        if event.num == 5 or (hasattr(event, 'delta') and event.delta < 0):
+            if self.current_pyramid_level < len(self.pyramid) - 1:
+                self.current_pyramid_level += 1
+        elif event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
+            if self.current_pyramid_level > 0:
+                self.current_pyramid_level -= 1
+        
+        self.update_pyramid_display()
+
+    def update_pyramid_display(self):
+        current_img = self.pyramid[self.current_pyramid_level]
+        
+        tk_img = self.processor.convert_to_tkimage(current_img)
+        
+        self.pyramid_canvas.delete("all")
+        self.pyramid_canvas.create_image(0, 0, anchor=tk.NW, image=tk_img)
+        
+        self.pyramid_canvas.config(scrollregion=(0, 0, current_img.shape[1], current_img.shape[0]))
+        
+        self.pyramid_canvas.tk_img = tk_img
+        
+        self.pyramid_window.title(f"Rozmiar: {self.pyramid_scales[self.current_pyramid_level]}x")
+        self.pyramid_window.geometry(f"{current_img.shape[1]}x{current_img.shape[0]}")
+
+        
 
     @image_required
     def apply_otsu_threshold(self):
@@ -1102,6 +1146,103 @@ class GUI:
         
         update_preview()
         
+    @image_required
+    def apply_grabcut(self):
+        self.context.label.bind("<ButtonPress-1>", self.on_grabcut_press)
+        self.context.label.bind("<B1-Motion>", self.on_grabcut_motion)
+        self.context.label.bind("<ButtonRelease-1>", self.on_grabcut_release)
+        
+        self.context.grabcut_start = None
+        self.context.grabcut_end = None
+
+    def on_grabcut_press(self, event):
+        self.context.grabcut_start = (event.x, event.y)
+        self.context.grabcut_end = (event.x, event.y)
+
+    def on_grabcut_motion(self, event):
+        self.context.grabcut_end = (event.x, event.y)
+        self.update_label_with_rectangle()
+
+    def on_grabcut_release(self, event):
+
+        self.context.grabcut_end = (event.x, event.y)
+
+        x0, y0 = self.context.grabcut_start
+        x1, y1 = self.context.grabcut_end
+        x, y = min(x0, x1), min(y0, y1)
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        rect = (x, y, w, h)
+
+        # unmount events
+        self.context.label.unbind("<ButtonPress-1>")
+        self.context.label.unbind("<B1-Motion>")
+        self.context.label.unbind("<ButtonRelease-1>")
+
+        # process grabcut
+        processed = self.processor.grabcut_segmentation(self.context.image, rect=rect)
+        self.context.image = processed
+        self.context.display_current_image()
+        
+    def update_label_with_rectangle(self):
+        image_copy = self.context.image.copy()
+
+        if self.context.grabcut_start and self.context.grabcut_end:
+            x0, y0 = self.context.grabcut_start
+            x1, y1 = self.context.grabcut_end
+            cv2.rectangle(image_copy, (x0, y0), (x1, y1), (0, 0, 255), 2)  # czerwony prostokąt
+
+        # aktualizacja obrazu 
+        image_rgb = cv2.cvtColor(image_copy, cv2.COLOR_BGR2RGB)
+        im_pil = Image.fromarray(image_rgb)
+        self.context.tk_image = ImageTk.PhotoImage(im_pil)
+        self.context.label.config(image=self.context.tk_image)
+
+    @image_required
+    def apply_watershed(self):
+        processed = self.processor.watershed_segmentation(self.context.image)
+        self.show_new_window("Watershed", 
+                       self.processor.convert_to_tkimage(processed),
+                       processed)
+    
+    @image_required
+    def apply_inpainting(self):
+        try:
+            processed = self.processor.inpaint(self.context.image)
+        except Exception as e:
+            self.show_error("Błąd", f"Operacja nie powiodła się: {str(e)}")
+            return
+        self.show_new_window("Inpainting",
+                       self.processor.convert_to_tkimage(processed),
+                       processed)
+        
+    @image_required
+    def apply_rle_compression(self):
+        try:
+            img = self.context.image
+            
+            compressed_data = self.processor.rle_compress(img)
+            
+            # Save to temporary file
+            temp_path = "temp_compressed.rle"
+            self.processor.save_rle_compressed(compressed_data, temp_path)
+            
+            # Calculate stats - THIS IS WHERE SK IS CALCULATED
+            stats = self.processor.calculate_compression_stats(img, temp_path)
+            
+            # Show results with compression level (SK)
+            result_msg = (
+                f"Original Size: {stats['original_size']:,} bytes\n"
+                f"Compressed Size: {stats['compressed_size']:,} bytes\n"
+                f"Compression Level (SK): {stats['compression_level']:.2f}\n"
+                f"Space Saved: {stats['space_saving']:.1%}"
+            )
+            messagebox.showinfo("RLE Compression Results", result_msg)
+            
+            # Clean up
+            os.remove(temp_path)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"RLE Compression failed: {str(e)}")
         
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
@@ -1122,6 +1263,9 @@ class WindowContext:
         self.processor = processor
         
         self.root.geometry("400x400")  
+        
+        self.grabcut_start = None
+        self.grabcut_end = None
         
         if image is not None:
             self.adjust_window_size()

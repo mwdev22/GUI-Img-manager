@@ -1,4 +1,5 @@
 import cv2
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -586,21 +587,28 @@ class ImageProcessor:
     @staticmethod
     def build_image_pyramid(image, levels_up=2, levels_down=2):
         pyramid = []
-        for i in range(1, levels_up + 1):
+        scales = []
+        # Create enlarged versions (zoom in)
+        for i in range(levels_up, 0, -1):  # Reverse order to get [2x, 4x] instead of [4x, 2x]
             scale = 2 ** i
+            scales.append(scale)
             enlarged = cv2.resize(image, None, fx=scale, fy=scale, 
-                                 interpolation=cv2.INTER_LINEAR)
+                                interpolation=cv2.INTER_LINEAR)
             pyramid.append(enlarged)
         
-        # pyramid.append(image.copy())
+        # Add original image
+        pyramid.append(image.copy())
+        scales.append(1)
         
+        # Create reduced versions (zoom out)
         for i in range(1, levels_down + 1):
             scale = 1 / (2 ** i)
+            scales.append(scale)
             reduced = cv2.resize(image, None, fx=scale, fy=scale, 
                                 interpolation=cv2.INTER_AREA)
             pyramid.append(reduced)
             
-        return pyramid
+        return pyramid, scales
 
     @staticmethod
     def manual_threshold(image, threshold):
@@ -619,3 +627,141 @@ class ImageProcessor:
         _, segmented = cv2.threshold(image, 0, 255, 
                                    cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return segmented
+
+    def grabcut_segmentation(self, image, rect=None, iterations=5):
+        
+        if not self.is_rgb(image):
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        
+        mask = np.zeros(image.shape[:2], np.uint8)
+        bgdModel = np.zeros((1, 65), np.float64)
+        fgdModel = np.zeros((1, 65), np.float64)
+
+        # default rect
+        if rect is None:
+            height, width = image.shape[:2]
+            rect = (10, 10, width - 20, height - 20)
+
+        cv2.grabCut(image, mask, rect, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_RECT)
+
+        mask2 = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
+        result = image * mask2[:, :, np.newaxis]
+
+        return result
+    
+    def watershed_segmentation(self, image):
+        if image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+
+        gray = self.to_grayscale(image)
+        
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        kernel = np.ones((3,3), np.uint8)
+        opening = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=2)
+        
+        sure_bg = cv2.dilate(opening, kernel, iterations=3)
+        
+        dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
+        _, sure_fg = cv2.threshold(dist_transform, 0.5*dist_transform.max(), 255, 0)
+        
+        sure_fg = np.uint8(sure_fg)
+        unknown = cv2.subtract(sure_bg, sure_fg)
+        
+        _, markers = cv2.connectedComponents(sure_fg)
+        
+        markers = markers + 1
+        
+        markers[unknown == 255] = 0
+        
+        markers = markers.astype(np.int32)
+        
+        markers = cv2.watershed(image, markers)
+        
+        result = image.copy()
+        result[markers == -1] = [0, 0, 255]  
+        
+        return result
+
+    def inpaint(self, image, line_color='black', line_width=4):
+
+        if not self.is_grayscale(image):
+            raise ValueError("Obraz musi być szaroodcieniowy")
+        
+        if line_color.lower() == 'black':
+            _, mask = cv2.threshold(image, 30, 255, cv2.THRESH_BINARY_INV)
+        else:  # white
+            _, mask = cv2.threshold(image, 225, 255, cv2.THRESH_BINARY)
+        
+        kernel = np.ones((line_width, line_width), np.uint8)
+        mask = cv2.dilate(mask, kernel)
+        
+        inpainted = cv2.inpaint(image, mask, inpaintRadius=line_width*2, 
+                            flags=cv2.INPAINT_TELEA)  # or cv2.INPAINT_NS
+        
+        return inpainted
+
+
+    def rle_compress(self, image):
+        if self.is_rgb(image):
+            # process each channel separately
+            compressed_channels = []
+            for channel in range(3):
+                channel_data = image[:, :, channel].flatten()
+                compressed_channels.append(self._rle_encode(channel_data))
+            return compressed_channels
+        else:  
+            return self._rle_encode(image.flatten())
+
+    def _rle_encode(self, data):
+        encoded = []
+        current_value = data[0]
+        count = 1
+
+        for value in data[1:]:
+            if value == current_value:
+                count += 1
+            else:
+                encoded.append((current_value, count))
+                current_value = value
+                count = 1
+        encoded.append((current_value, count))
+        return encoded
+
+    def rle_decompress(self, compressed_data, original_shape):
+        if isinstance(compressed_data[0], list):  # Color image
+            channels = []
+            for channel_data in compressed_data:
+                channels.append(self._rle_decode(channel_data))
+            reconstructed = np.stack(channels, axis=-1)
+            return reconstructed.reshape(original_shape)
+        else:  # Grayscale
+            return self._rle_decode(compressed_data).reshape(original_shape)
+
+    def _rle_decode(self, encoded_data):
+        decoded = []
+        for value, count in encoded_data:
+            decoded.extend([value] * count)
+        return np.array(decoded, dtype=np.uint8)
+
+    def save_rle_compressed(self, compressed_data, filepath):
+        with open(filepath, 'wb') as f:
+            np.save(f, np.array(compressed_data, dtype=object))
+
+    def load_rle_compressed(self, filepath):
+        with open(filepath, 'rb') as f:
+            return np.load(f, allow_pickle=True)
+
+    def calculate_compression_stats(self, original_image, compressed_filepath):
+        original_size = original_image.nbytes  
+        compressed_size = os.path.getsize(compressed_filepath)
+        
+        compression_level = original_size / compressed_size
+        space_saving = 1 - (compressed_size / original_size)
+        
+        return {
+            'original_size': original_size,
+            'compressed_size': compressed_size,
+            'compression_level': compression_level,  
+            'space_saving': space_saving
+        }
