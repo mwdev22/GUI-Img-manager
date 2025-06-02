@@ -1,9 +1,12 @@
 import tkinter as tk
+import zlib
 from tkinter import (
     Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, 
     Button, Entry, simpledialog, LEFT, StringVar, 
-    Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X
+    Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X,
+    Text, WORD, Scrollbar, RIGHT, Y
 )
+import csv
 from PIL import ImageTk, Image
 import cv2
 import numpy as np
@@ -81,7 +84,8 @@ class GUI:
 
     def create_file_menu(self, menubar):
         file_menu = Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Wczytaj obraz", command=self.open_file_dialog)
+        file_menu.add_command(label="Wczytaj obraz", command=self.load_image)
+        file_menu.add_command(label="Zapisz obraz", command=self.save_image)
         file_menu.add_command(label="Resetuj obraz", command=self.reset_image)
         file_menu.add_command(label="Kompresja RLE", command=self.apply_rle_compression)
         file_menu.add_command(label="Zamknij", command=self.root.quit)
@@ -148,6 +152,7 @@ class GUI:
         advanced_menu.add_command(label="Detekcja krawędzi (Hough)", command=self.detect_lines_hough)
         advanced_menu.add_command(label="Linia Profilu", command=self.start_profile_line)
         advanced_menu.add_command(label="Piramida obrazów", command=self.show_image_pyramid)
+        advanced_menu.add_command(label="Analiza obrazu", command=self.analyze_object_features)
 
         menubar.add_cascade(label="Przetwarzanie", menu=process_menu)
         menubar.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
@@ -167,9 +172,35 @@ class GUI:
             filetypes=[("Pliki graficzne", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff", "*.gif"))]
         )
 
-        if file_paths:
-            self.load_image(file_paths[0])
+        return file_paths
 
+        
+    def save_image(self):
+        if self.context.image is None:
+            self.show_error("Błąd", "Nie ma obrazu do zapisania.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Zapisz obraz",
+            defaultextension=".png",
+            filetypes=[("Pliki graficzne", ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff"))]
+        )
+
+        if file_path:
+            cv2.imwrite(file_path, self.context.image)
+            self.show_message("Sukces", f"Obraz zapisany w {file_path}")
+
+    def save_file_dialog(self, file_name):
+        file_path = filedialog.asksaveasfilename(
+            title="Save Compressed File",
+            defaultextension=".rle",
+            initialfile=file_name,
+            filetypes=[
+                ("RLE Compressed Files", "*.rle"),
+                ("All Files", "*.*")
+            ]
+        )
+        return file_path
 
     #   info messages for user
     def show_message(self, title, message):
@@ -568,7 +599,11 @@ class GUI:
     # -------------- END OF USER INTERACTIONS -------------
     
     # -------------- IMAGE MANAGEMENT ---------------------
-    def load_image(self, path):
+    def load_image(self):
+        paths = self.open_file_dialog()
+        if not paths:
+            return
+        path = paths[0]
         ctx = self.windows.get(self.root)
         ctx.image = self.processor.load_image(path)
         ctx.og_image = ctx.image.copy()
@@ -1220,30 +1255,126 @@ class GUI:
         try:
             img = self.context.image
             
-            compressed_data = self.processor.rle_compress(img)
+            compressed_data = self.processor.rle_encode(img)
+
+            save_path = self.save_file_dialog("compressed_image.rle")
+            if not save_path:
+                return
             
-            # Save to temporary file
-            temp_path = "temp_compressed.rle"
-            self.processor.save_rle_compressed(compressed_data, temp_path)
-            
-            # Calculate stats - THIS IS WHERE SK IS CALCULATED
-            stats = self.processor.calculate_compression_stats(img, temp_path)
-            
-            # Show results with compression level (SK)
+            self.processor.save_rle(compressed_data, save_path)
+
+            original_size = img.size  
+
+
+            stats = self.processor.calculate_compression_stats(img, compressed_data)
+
             result_msg = (
-                f"Original Size: {stats['original_size']:,} bytes\n"
-                f"Compressed Size: {stats['compressed_size']:,} bytes\n"
-                f"Compression Level (SK): {stats['compression_level']:.2f}\n"
-                f"Space Saved: {stats['space_saving']:.1%}"
+                f"Oryginalny rozmiar: {original_size:,} bajtów\n"
+                f"Rozmiar skompresowanego obrazu: {stats['compressed_size']:,} bajtów\n"
+                f"Stopień Kompresji (SK): {stats['compression_level']:.2f}\n"
+                f"Zaoszczędzone miejsce: {stats['space_saving']:.1%}"
             )
-            messagebox.showinfo("RLE Compression Results", result_msg)
             
-            # Clean up
-            os.remove(temp_path)
-            
+            messagebox.showinfo("Statystyki kompresji RLE", result_msg)
+
         except Exception as e:
+            print(e)
             messagebox.showerror("Error", f"RLE Compression failed: {str(e)}")
+
+    @image_required
+    def analyze_object_features(self):
+        if not self.processor.is_binary(self.context.image):
+            self.show_error("Error", "Feature analysis requires binary image")
+            return
+            
+        features_list = self.processor.calculate_features(self.context.image)
         
+        if not features_list:
+            self.show_message("Info", "No objects found in the binary image")
+            return
+            
+        dialog = self._create_centered_dialog("Analiza obrazu")
+        
+        # Create text widget for displaying features
+        text = Text(dialog, wrap=WORD, width=80, height=30)
+        scroll = Scrollbar(dialog, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        
+        scroll.pack(side=RIGHT, fill=Y)
+        text.pack(fill=BOTH, expand=True)
+        
+        # Display features for each object
+        for i, features in enumerate(features_list, 1):
+            text.insert(END, f"\n=== Object {i} ===\n")
+            
+            # Format and display moments
+            text.insert(END, "\nMoments:\n")
+            for name, value in features['moments'].items():
+                text.insert(END, f"{name}: {value:.2f}\n")
+            
+            # Basic features
+            text.insert(END, "\nBasic Features:\n")
+            text.insert(END, f"Area: {features['area']:.2f}\n")
+            text.insert(END, f"Perimeter: {features['perimeter']:.2f}\n")
+            
+            # Shape coefficients
+            text.insert(END, "\nShape Coefficients:\n")
+            text.insert(END, f"Aspect Ratio: {features['aspect_ratio']:.3f}\n")
+            text.insert(END, f"Extent: {features['extent']:.3f}\n")
+            text.insert(END, f"Solidity: {features['solidity']:.3f}\n")
+            text.insert(END, f"Equivalent Diameter: {features['equivalent_diameter']:.2f}\n")
+            
+            # Hu moments
+            text.insert(END, "\nHu Moments (invariant):\n")
+            for j, hu in enumerate(features['hu_moments'], 1):
+                text.insert(END, f"Hu{j}: {hu:.6f}\n")
+            
+            text.insert(END, "\n" + "="*40 + "\n")
+        
+        # Add save button
+        btn_frame = Frame(dialog)
+        btn_frame.pack(pady=5)
+        
+        Button(btn_frame, text="Save Features", 
+              command=lambda: self.save_features(features_list)).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Close", 
+              command=dialog.destroy).pack(side=LEFT, padx=5)
+    
+    def save_features(self, features_list):
+        """Save features to CSV file"""
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            with open(file_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                writer.writerow([
+                    'Object', 'Area', 'Perimeter', 'AspectRatio', 
+                    'Extent', 'Solidity', 'EquivalentDiameter'
+                ] + [f'Hu{i}' for i in range(1, 8)])
+                
+                # Write data
+                for i, features in enumerate(features_list, 1):
+                    writer.writerow([
+                        i,
+                        features['area'],
+                        features['perimeter'],
+                        features['aspect_ratio'],
+                        features['extent'],
+                        features['solidity'],
+                        features['equivalent_diameter']
+                    ] + features['hu_moments'])
+                    
+            self.show_message("Success", f"Features saved to {file_path}")
+        except Exception as e:
+            self.show_error("Error", f"Failed to save features: {str(e)}")
+
     # -------------- END OF IMAGE OPERATIONS ---------------------
 
     def run(self):

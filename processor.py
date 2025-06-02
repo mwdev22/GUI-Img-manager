@@ -1,4 +1,6 @@
 import cv2
+import pickle
+import zlib
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -701,67 +703,108 @@ class ImageProcessor:
         
         return inpainted
 
+    @staticmethod
+    def rle_encode(image: np.ndarray):
+        flat = image.flatten()
+        values = []
+        counts = []
 
-    def rle_compress(self, image):
-        if self.is_rgb(image):
-            # process each channel separately
-            compressed_channels = []
-            for channel in range(3):
-                channel_data = image[:, :, channel].flatten()
-                compressed_channels.append(self._rle_encode(channel_data))
-            return compressed_channels
-        else:  
-            return self._rle_encode(image.flatten())
-
-    def _rle_encode(self, data):
-        encoded = []
-        current_value = data[0]
+        prev_pixel = flat[0]
         count = 1
 
-        for value in data[1:]:
-            if value == current_value:
+        for pixel in flat[1:]:
+            if pixel == prev_pixel:
                 count += 1
             else:
-                encoded.append((current_value, count))
-                current_value = value
+                values.append(prev_pixel)
+                counts.append(count)
+                prev_pixel = pixel
                 count = 1
-        encoded.append((current_value, count))
+
+        values.append(prev_pixel)
+        counts.append(count)
+
+        encoded = np.vstack((counts, values)).T.astype(np.uint16)  
         return encoded
 
-    def rle_decompress(self, compressed_data, original_shape):
-        if isinstance(compressed_data[0], list):  # Color image
-            channels = []
-            for channel_data in compressed_data:
-                channels.append(self._rle_decode(channel_data))
-            reconstructed = np.stack(channels, axis=-1)
-            return reconstructed.reshape(original_shape)
-        else:  # Grayscale
-            return self._rle_decode(compressed_data).reshape(original_shape)
+    @staticmethod
+    def rle_decode(rle, shape):
+        flat = []
+        for count, pixel in rle:
+            flat.extend([pixel] * count)
+        
+        return np.array(flat, dtype=np.uint8).reshape(shape)
 
-    def _rle_decode(self, encoded_data):
-        decoded = []
-        for value, count in encoded_data:
-            decoded.extend([value] * count)
-        return np.array(decoded, dtype=np.uint8)
+    @staticmethod
+    def save_rle(rle, filepath):
+        np.save(filepath, rle, allow_pickle=True)
 
-    def save_rle_compressed(self, compressed_data, filepath):
-        with open(filepath, 'wb') as f:
-            np.save(f, np.array(compressed_data, dtype=object))
-
-    def load_rle_compressed(self, filepath):
+    @staticmethod
+    def load_rle(filepath):
         with open(filepath, 'rb') as f:
-            return np.load(f, allow_pickle=True)
+            return pickle.load(f)
 
-    def calculate_compression_stats(self, original_image, compressed_filepath):
-        original_size = original_image.nbytes  
-        compressed_size = os.path.getsize(compressed_filepath)
-        
-        compression_level = original_size / compressed_size
-        space_saving = 1 - (compressed_size / original_size)
-        
+    
+    @staticmethod   
+    def calculate_compression_stats(image: np.ndarray, compressed: np.ndarray):
+        kp = image.nbytes  # size in memory (oryginalny obraz)
+        kw = compressed.nbytes  # compressed size (po RLE)
+
+        compression_level = kp / kw if kw != 0 else float('inf')
+        space_saving = 1 - (kw / kp)
+
         return {
-            'original_size': original_size,
-            'compressed_size': compressed_size,
-            'compression_level': compression_level,  
-            'space_saving': space_saving
+            'original_size': kp,
+            'compressed_size': kw,
+            'compression_level': compression_level,
+            'space_saving': space_saving,
         }
+
+    @staticmethod
+    def calculate_features(binary_image):
+        contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        features_list = []
+        
+        for i, cnt in enumerate(contours):
+            if cv2.contourArea(cnt) < 100: 
+                continue
+                
+            features = {}
+            
+            moments = cv2.moments(cnt)
+            features['moments'] = {
+                'm00': moments['m00'],
+                'm10': moments['m10'],
+                'm01': moments['m01'],
+                'mu20': moments['mu20'],
+                'mu11': moments['mu11'],
+                'mu02': moments['mu02'],
+                'mu30': moments['mu30'],
+                'mu21': moments['mu21'],
+                'mu12': moments['mu12'],
+                'mu03': moments['mu03']
+            }
+            
+            features['area'] = cv2.contourArea(cnt)
+            features['perimeter'] = cv2.arcLength(cnt, True)
+            
+            _, _, w, h = cv2.boundingRect(cnt)
+            features['aspect_ratio'] = float(w)/h if h != 0 else 0
+            
+            rect_area = w * h
+            features['extent'] = features['area']/rect_area if rect_area != 0 else 0
+            
+            hull = cv2.convexHull(cnt)
+            hull_area = cv2.contourArea(hull)
+            features['solidity'] = features['area']/hull_area if hull_area != 0 else 0
+            
+            features['equivalent_diameter'] = np.sqrt(4*features['area']/np.pi)
+            
+            hu_moments = cv2.HuMoments(moments)
+            features['hu_moments'] = [moment[0] for moment in hu_moments]
+            
+            features_list.append(features)
+            
+        return features_list
+
