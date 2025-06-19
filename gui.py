@@ -1,7 +1,7 @@
 import tkinter as tk
 import zlib
 from tkinter import (
-    Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, 
+    Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, dialog,
     Button, Entry, simpledialog, LEFT, StringVar, 
     Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X,
     Text, WORD, Scrollbar, RIGHT, Y
@@ -16,6 +16,7 @@ from functools import wraps
 from processor import ImageProcessor, BORDER_TYPES
 import os
 
+from detector import Detector
 
 class GUI:
     def __init__(self):
@@ -25,11 +26,13 @@ class GUI:
         self.root.title("Image Processor")
         self.root.geometry("800x600")
         self.root.option_add('*tearOff', False)
-        
+
         # processor for image operations
         self.processor = ImageProcessor()
 
         self.mount_menu()
+
+
         
         frame = Frame(self.root)
         frame.pack(fill="both", expand=True)
@@ -48,8 +51,14 @@ class GUI:
         
         self.profile_points = []
         self.profile_line_active = False
+
+
+        self.detector = Detector()
+        self.camera_permission = False
         
         self.root.bind("<Button-1>", lambda event, root=self.root: self.dispatch_click_handler(event, root))
+
+        
         
         
     # helper decorator for operations
@@ -76,20 +85,19 @@ class GUI:
         menubar = Menu(root)
         self.root.config(menu=menubar)
 
-        file_menu = self.create_file_menu(menubar)
-        menubar.add_cascade(label="Plik", menu=file_menu)
-
+        self.create_file_menu(menubar)
         self.create_process_menus(menubar)
+        self.create_detector_menu(menubar)
         
 
-    def create_file_menu(self, menubar):
+    def create_file_menu(self, menubar: Menu):
         file_menu = Menu(menubar, tearoff=0)
         file_menu.add_command(label="Wczytaj obraz", command=self.load_image)
         file_menu.add_command(label="Zapisz obraz", command=self.save_image)
         file_menu.add_command(label="Resetuj obraz", command=self.reset_image)
         file_menu.add_command(label="Kompresja RLE", command=self.apply_rle_compression)
         file_menu.add_command(label="Zamknij", command=self.root.quit)
-        return file_menu
+        menubar.add_cascade(label="Plik", menu=file_menu)
 
     def create_process_menus(self, menubar: Menu):
         
@@ -158,6 +166,15 @@ class GUI:
         menubar.add_cascade(label="Operacje sąsiedztwa", menu=neighboorhood_op_menu)
         menubar.add_cascade(label="Operacje zaawansowane", menu=advanced_menu)
         menubar.add_cascade(label="Segmentacja", menu=segmentation_menu)
+
+        
+    def create_detector_menu(self, menubar: Menu):
+        detector_menu = Menu(menubar, tearoff=0)
+
+        detector_menu.add_command(label="Analiza Wideo", command=self.video_detection)
+        detector_menu.add_command(label="Analiza live", command=self.live_detection)
+        
+        menubar.add_cascade(label="Projekt", menu=detector_menu)
 
     # --------- END OF MENU -------------------
 
@@ -1376,6 +1393,42 @@ class GUI:
             self.show_error("Error", f"Failed to save features: {str(e)}")
 
     # -------------- END OF IMAGE OPERATIONS ---------------------
+
+    # ---------------------DETECTOR ------------------------------
+
+    def live_detection(self):
+        if not self.camera_permission:
+            allowed = messagebox.askyesno("Uprawnienia kamery", "Czy zezwalasz na dostęp do twojej kamery?")
+            if not allowed:
+                return
+        self.camera_permission = True
+        self.detector.live_detection()
+
+    def video_detection(self):
+        
+        self.show_message("Wybór pliku", "Wybierz plik wideo do detekcji obiektów.")
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv")]
+        )
+        if not file_path:
+            return
+
+        self.show_message("Zapis", "Wybierz ściekę do zapisu przetworzonego wideo.")
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".mp4",
+            filetypes=[("MP4 files", "*.mp4")],
+            initialfile=os.path.splitext(os.path.basename(file_path))[0] + "_detected.mp4"
+        )
+        if not save_path:
+            return
+
+        try:
+            self.detector.video_detection(file_path, save_path)
+        except Exception as e:
+            self.show_error("Błąd", e)
+            return
+
+
 
     def run(self):
         self.root.mainloop()
