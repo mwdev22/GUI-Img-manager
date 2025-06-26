@@ -4,7 +4,7 @@ from tkinter import (
     Tk, Menu, filedialog, Label, messagebox, Toplevel, Frame, dialog,
     Button, Entry, simpledialog, LEFT, StringVar, 
     Radiobutton, W, IntVar, BOTH, E, END, EW, Scale, HORIZONTAL, X,
-    Text, WORD, Scrollbar, RIGHT, Y
+    Text, WORD, Scrollbar, RIGHT, Y, ttk, DoubleVar
 )
 import csv
 from PIL import ImageTk, Image
@@ -17,6 +17,8 @@ from processor import ImageProcessor, BORDER_TYPES
 import os
 
 from detector import Detector
+import subprocess
+import sys
 
 class GUI:
     def __init__(self):
@@ -171,8 +173,9 @@ class GUI:
     def create_detector_menu(self, menubar: Menu):
         detector_menu = Menu(menubar, tearoff=0)
 
-        detector_menu.add_command(label="Analiza Wideo", command=self.video_detection)
+        detector_menu.add_command(label="Analiza wideo", command=self.video_detection)
         detector_menu.add_command(label="Analiza live", command=self.live_detection)
+        detector_menu.add_command(label="Ustawienia detekcji", command=self.set_detection_params)
         
         menubar.add_cascade(label="Projekt", menu=detector_menu)
 
@@ -1423,10 +1426,68 @@ class GUI:
             return
 
         try:
-            self.detector.video_detection(file_path, save_path)
+            top_level = Toplevel(self.root)
+            label = Label(top_level, text=f"Przetwarzanie: {file_path}")
+            label.pack(padx=10, pady=(10, 5))
+
+            progress = ttk.Progressbar(top_level, orient="horizontal", length=400, mode="determinate", maximum=100)
+            progress.pack(padx=10, pady=10)
+
+            percent_label = ttk.Label(top_level, text="0%")
+            percent_label.pack(pady=(0, 10))
+            self.root.update()
+            self.detector.video_detection(progress, percent_label, top_level, file_path, save_path)
+
+    
+            top_level.destroy()
+            self.show_message("Sukces", f"Detekcja zakończona. Przetworzone wideo zapisano jako {save_path}")
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', save_path])
+            elif sys.platform.startswith('win'):
+                os.startfile(save_path)
+            elif sys.platform.startswith('linux'):
+                subprocess.Popen(['xdg-open', save_path])
+
         except Exception as e:
             self.show_error("Błąd", e)
             return
+
+    def set_detection_params(self):
+        def apply():
+            self.detector.scale_factor = scale_var.get()
+            self.detector.min_neighbors = neighbors_var.get()
+            param_win.destroy()
+
+        param_win = Toplevel(self.root)
+        param_win.title("Ustawienia detekcji")
+
+        Label(param_win, text="Skalowanie (zmniejszanie rozdzielczości w kazdym kroku)").pack(pady=(10, 0))
+        scale_var = DoubleVar(value=getattr(self.detector, "scale_factor", 1.1))
+        scale_slider = Scale(
+            param_win,
+            variable=scale_var,
+            from_=1.05,
+            to=2.5,
+            resolution=0.05,
+            orient="horizontal",
+            length=300
+        )
+        scale_slider.pack(pady=5)
+
+        Label(param_win, text="Min. sąsiedzi (ile wykryć twarzy musi się ze sobą pokrywać w roznych skalach)").pack(pady=(10, 0))
+        neighbors_var = IntVar(value=getattr(self.detector, "min_neighbors", 5))
+        neighbors_slider = Scale(
+            param_win,
+            variable=neighbors_var,
+            from_=1,
+            to=10,
+            orient="horizontal",
+            length=300
+        )
+        neighbors_slider.pack(pady=5)
+
+        Button(param_win, text="Zastosuj", command=apply).pack(pady=10)
+
 
 
 
